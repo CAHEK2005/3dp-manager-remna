@@ -157,7 +157,6 @@ get_random_port() {
   done
 }
 FINAL_PORT=$(get_random_port)
-DB_EXTERNAL_PORT="5432"
 
 # --- 4. Генерация паролей ---
 DB_PASS=$(openssl rand -base64 12)
@@ -255,7 +254,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASS}
       POSTGRES_DB: 3dp_manager
     ports:
-      - "127.0.0.1:${DB_EXTERNAL_PORT}:5432"
+      - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
