@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, TextField, Button, Typography, List, ListItem, ListItemText, IconButton, Paper, TablePagination } from '@mui/material';
-import { Delete, Add, DeleteSweep, UploadFile, Remove } from '@mui/icons-material';
+import { Delete, Add, UploadFile, Remove } from '@mui/icons-material';
 import api from '../api';
 
 interface Domain { id: number; name: string; }
@@ -9,22 +9,15 @@ export default function DomainsPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [newDomain, setNewDomain] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [totalCount, setTotalCount] = useState(0); // Общее кол-во записей в БД
+  const [totalCount, setTotalCount] = useState(0);
 
-  // Состояние пагинации
-  const [page, setPage] = useState(0); // MUI использует индекс с 0
-  const [rowsPerPage, setRowsPerPage] = useState(10); // По умолчанию 10
-
-  useEffect(() => {
-    loadDomains();
-  }, [page, rowsPerPage]);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const loadDomains = async () => {
     try {
-      // Backend ждет page начиная с 1, а MUI дает с 0. Поэтому page + 1
       const { data } = await api.get(`/domains?page=${page + 1}&limit=${rowsPerPage}`);
 
-      // Сервер теперь возвращает { data: [], total: 123 }
       setDomains(data.data);
       setTotalCount(data.total);
     } catch (e) {
@@ -32,15 +25,17 @@ export default function DomainsPage() {
     }
   };
 
-  // Обработчик смены страницы
-  const handleChangePage = (event: unknown, newPage: number) => {
+  useEffect(() => {
+    loadDomains();
+  }, [page, rowsPerPage]);
+
+  const handleChangePage = (_event: unknown, newPage: number) => {
     setPage(newPage);
   };
 
-  // Обработчик смены кол-ва строк на странице
   const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
     setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0); // Сбрасываем на первую страницу
+    setPage(0);
   };
 
   const handleAdd = async () => {
@@ -61,12 +56,11 @@ export default function DomainsPage() {
         try {
           await api.delete('/domains/all');
           loadDomains();
-        } catch (e) { alert('Ошибка удаления'); }
+        } catch (_e) { alert('Ошибка удаления'); }
       }
     }
   };
 
-  // --- ЛОГИКА ЗАГРУЗКИ ФАЙЛА ---
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -76,18 +70,15 @@ export default function DomainsPage() {
       const text = e.target?.result as string;
       if (!text) return;
 
-      // Разбиваем текст на строки по переносу
       const lines = text.split(/\r?\n/);
 
-      // Отправляем на сервер
       try {
         const { data } = await api.post('/domains/upload', { domains: lines });
         alert(`Успешно добавлено доменов: ${data.count}`);
         loadDomains();
-      } catch (err) {
+      } catch (_err) {
         alert('Ошибка при загрузке списка');
       } finally {
-        // Сбрасываем инпут, чтобы можно было загрузить тот же файл повторно
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     };
@@ -111,7 +102,6 @@ export default function DomainsPage() {
         >
           Из файла
         </Button>
-        {/* Скрытый инпут */}
         <input
           type="file"
           accept=".txt"

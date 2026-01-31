@@ -20,13 +20,12 @@ export class ClientController {
   ) { }
 
   @Public()
-  @Get('bus/:uuid') // Тот самый путь /bus/UUID
+  @Get('bus/:uuid')
   async getSubscription(
     @Param('uuid') uuid: string,
     @Req() req: Request,
     @Res() res: Response
   ) {
-    // 1. Ищем подписку
     const sub = await this.subRepo.findOne({
       where: { uuid },
       relations: ['inbounds']
@@ -36,12 +35,10 @@ export class ClientController {
       throw new HttpException('Subscription not found', HttpStatus.NOT_FOUND);
     }
 
-    // 2. Генерируем список ссылок (Config)
     const links = sub.inbounds
       ?.map(i => i.link)
       .filter(l => l && l.length > 0) || [];
 
-    // Формируем Base64 строку (это и есть подписка для клиента)
     const plainTextList = links.join('\n');
     const base64Config = Buffer.from(plainTextList).toString('base64');
 
@@ -67,7 +64,6 @@ export class ClientController {
         console.log(`Взяли QR из кэша для ${uuid}`);
       }
 
-      // HTML шаблон
       const html = `
         <!DOCTYPE html>
         <html lang="ru">
@@ -190,7 +186,6 @@ export class ClientController {
         console.log(`Взяли QR из кэша для ${uuid}`);
       }
 
-      // HTML шаблон
       const html = `
         <!DOCTYPE html>
         <html lang="ru">

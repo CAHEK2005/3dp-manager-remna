@@ -33,7 +33,6 @@ export class AuthService {
 
     this.logger.log(`Пользователь найден, проверяем хеш пароля...`);
     
-    // Сравниваем пароль
     const isMatch = await bcrypt.compare(pass, dbPass.value);
     
     if (isMatch) {
@@ -63,9 +62,6 @@ export class AuthService {
     this.logger.log('Пароль администратора изменен.');
   }
 
-  // ... imports
-// (Оставьте существующие методы без изменений, добавьте/обновите этот)
-
   async updateAdminProfile(login: string, password?: string) {
     let loginSetting = await this.settingsRepo.findOne({ where: { key: 'admin_login' } });
     if (!loginSetting) loginSetting = this.settingsRepo.create({ key: 'admin_login' });
@@ -85,19 +81,15 @@ export class AuthService {
     this.logger.log(`Профиль администратора обновлен. Новый логин: ${login}`);
   }
 
-  // Обновленный метод инициализации
   async seedAdmin() {
     const login = await this.settingsRepo.findOne({ where: { key: 'admin_login' } });
     
-    // Если пользователя нет ИЛИ если нужно принудительно сбросить (для отладки)
     if (!login) {
       this.logger.log('Инициализация администратора (admin / admin)...');
       
-      // 1. Сохраняем логин
       const loginSetting = this.settingsRepo.create({ key: 'admin_login', value: 'admin' });
       await this.settingsRepo.save(loginSetting);
 
-      // 2. Сохраняем пароль
       const hash = await bcrypt.hash('admin', 10);
       const passSetting = this.settingsRepo.create({ key: 'admin_password', value: hash });
       await this.settingsRepo.save(passSetting);

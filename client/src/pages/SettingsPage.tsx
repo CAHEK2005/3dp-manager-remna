@@ -1,38 +1,47 @@
 import React, { useEffect, useState } from 'react';
-import { Box, TextField, Button, Typography, Paper, Snackbar, Alert, Grid, Divider, InputAdornment } from '@mui/material';
+import { Box, TextField, Button, Typography, Paper, Snackbar, Alert, Grid, Divider, InputAdornment, Stack, Chip } from '@mui/material';
 import api from '../api';
-import { useAuth } from '../auth/AuthContext';
+
+const ROTATION_PRESETS = [
+  { label: 'Сутки', value: 1440 },
+  { label: '3 дня', value: 4320 },
+  { label: 'Неделя', value: 10080 },
+];
 
 export default function SettingsPage() {
-  // Настройки 3x-ui и ротации
   const [settings, setSettings] = useState({
     xui_url: '',
     xui_login: '',
     xui_password: '',
-    rotation_interval: '30', // Значение по умолчанию
+    rotation_interval: '30',
   });
 
-  // Настройки админа (локальное состояние формы)
   const [adminProfile, setAdminProfile] = useState({
     login: '',
     password: '',
   });
 
-  const [msg, setMsg] = useState({ open: false, type: 'success' as 'success'|'error', text: '' });
-  const { logout } = useAuth(); // Чтобы разлогинить, если сменили свои данные
+  const [msg, setMsg] = useState({ open: false, type: 'success' as 'success' | 'error', text: '' });
+  const [intervalError, setIntervalError] = useState('');
 
   useEffect(() => {
     loadSettings();
   }, []);
 
+  useEffect(() => {
+    const val = parseInt(settings.rotation_interval, 10);
+    if (isNaN(val) || val < 10) {
+      setIntervalError('Минимальный интервал — 10 минут');
+    } else {
+      setIntervalError('');
+    }
+  }, [settings.rotation_interval]);
+
   const loadSettings = async () => {
     try {
       const { data } = await api.get('/settings');
-      // Заполняем основные настройки
       setSettings((prev) => ({ ...prev, ...data }));
-      
-      // Логин админа тоже приходит в settings (если мы разрешили его чтение), 
-      // но пароль (хеш) показывать нельзя.
+
       if (data.admin_login) {
         setAdminProfile((prev) => ({ ...prev, login: data.admin_login }));
       }
@@ -41,14 +50,21 @@ export default function SettingsPage() {
     }
   };
 
-  // --- Handlers для настроек 3x-ui и ротации ---
   const handleSettingChange = (prop: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setSettings({ ...settings, [prop]: event.target.value });
   };
 
+  const handlePresetClick = (minutes: number) => {
+    setSettings(prev => ({ ...prev, rotation_interval: minutes.toString() }));
+  };
+
   const handleSaveSettings = async () => {
+    if (intervalError) {
+      setMsg({ open: true, text: 'Исправьте ошибки перед сохранением', type: 'error' });
+      return;
+    }
+
     try {
-      // Отправляем всё, что в settings
       await api.post('/settings', settings);
       setMsg({ open: true, type: 'success', text: 'Настройки сохранены!' });
     } catch (e) {
@@ -56,7 +72,6 @@ export default function SettingsPage() {
     }
   };
 
-  // --- Handlers для профиля админа ---
   const handleAdminChange = (prop: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setAdminProfile({ ...adminProfile, [prop]: event.target.value });
   };
@@ -65,12 +80,20 @@ export default function SettingsPage() {
     try {
       await api.post('/auth/update-profile', adminProfile);
       setMsg({ open: true, type: 'success', text: 'Профиль администратора обновлен!' });
-      setAdminProfile(prev => ({ ...prev, password: '' })); // Очищаем поле пароля
-      
-      // Опционально: можно сделать логаут, чтобы заставить войти с новыми данными
-      // logout(); 
+      setAdminProfile(prev => ({ ...prev, password: '' }));
     } catch (e) {
       setMsg({ open: true, type: 'error', text: 'Ошибка обновления профиля' });
+    }
+  };
+
+  const handleForceRotate = async () => {
+    if (confirm('ВНИМАНИЕ: Это немедленно обновит конфиги в подписках.\n\nИнтервал автоматической ротации НЕ будет сброшен.\n\nПродолжить?')) {
+      try {
+        await api.post('/rotation/rotate-all');
+        setMsg({ open: true, type: 'success', text: 'Ротация успешно выполнена!' });
+      } catch (e) {
+        setMsg({ open: true, type: 'error', text: 'Ошибка при запуске ротации' });
+      }
     }
   };
 
@@ -79,13 +102,12 @@ export default function SettingsPage() {
       <Typography variant="h4" gutterBottom>Настройки утилиты</Typography>
 
       <Grid container spacing={3}>
-        
-        {/* БЛОК 1: Подключение к 3x-ui */}
+
         <Grid size={{ xs: 12, md: 6 }}>
           <Paper sx={{ p: 3, height: '100%' }}>
             <Typography variant="h6" gutterBottom>Панель 3x-ui</Typography>
             <Divider sx={{ mb: 2 }} />
-            
+
             <TextField
               fullWidth margin="normal" label="URL панели"
               value={settings.xui_url} onChange={handleSettingChange('xui_url')}
@@ -99,22 +121,20 @@ export default function SettingsPage() {
               fullWidth margin="normal" label="Пароль 3x-ui" type="password"
               value={settings.xui_password} onChange={handleSettingChange('xui_password')}
             />
-            
+
             <Button variant="contained" sx={{ mt: 2 }} onClick={handleSaveSettings}>
               Сохранить подключение
             </Button>
           </Paper>
         </Grid>
 
-        {/* БЛОК 2: Ротация и Админка */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            
-            {/* Настройки Ротации */}
+
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>Генерация инбаундов</Typography>
               <Divider sx={{ mb: 2 }} />
-              
+
               <TextField
                 fullWidth margin="normal" label="Интервал генерации"
                 type="number"
@@ -125,24 +145,43 @@ export default function SettingsPage() {
                 }}
                 helperText="Как часто менять инбаунды (минимум 10 мин)"
               />
+              <Stack direction="row" spacing={1} sx={{ mt: 1, mb: 2 }}>
+                {ROTATION_PRESETS.map((preset) => (
+                  <Chip
+                    key={preset.value}
+                    label={preset.label}
+                    onClick={() => handlePresetClick(preset.value)}
+                    color={settings.rotation_interval === preset.value.toString() ? "primary" : "default"}
+                    variant={settings.rotation_interval === preset.value.toString() ? "filled" : "outlined"}
+                    clickable
+                  />
+                ))}
+              </Stack>
               <Button variant="contained" sx={{ mt: 2 }} onClick={handleSaveSettings}>
                 Применить интервал
               </Button>
+              <Button
+                variant="outlined"
+                color="warning"
+                onClick={handleForceRotate}
+                sx={{ mt: 2, ml: 2 }}
+              >
+                Сгенерировать сейчас
+              </Button>
             </Paper>
 
-            {/* Настройки Администратора */}
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>Доступ к 3DP-MANAGER</Typography>
               <Divider sx={{ mb: 2 }} />
-              
+
               <TextField
                 fullWidth margin="normal" label="Логин администратора"
-                value={adminProfile.login} 
+                value={adminProfile.login}
                 onChange={handleAdminChange('login')}
               />
               <TextField
                 fullWidth margin="normal" label="Новый пароль" type="password"
-                value={adminProfile.password} 
+                value={adminProfile.password}
                 onChange={handleAdminChange('password')}
                 helperText="Оставьте пустым, если не хотите менять"
               />
@@ -155,7 +194,7 @@ export default function SettingsPage() {
         </Grid>
       </Grid>
 
-      <Snackbar open={msg.open} autoHideDuration={5000} onClose={() => setMsg({...msg, open: false})}>
+      <Snackbar open={msg.open} autoHideDuration={5000} onClose={() => setMsg({ ...msg, open: false })}>
         <Alert severity={msg.type}>{msg.text}</Alert>
       </Snackbar>
     </Box>

@@ -10,6 +10,7 @@ import { Subscription } from '../subscriptions/entities/subscription.entity';
 import { Inbound } from '../inbounds/entities/inbound.entity';
 import { Domain } from '../domains/entities/domain.entity';
 import { Setting } from '../settings/entities/setting.entity';
+import { RotationController } from './rotation.controller';
 
 @Module({
   imports: [
@@ -19,5 +20,6 @@ import { Setting } from '../settings/entities/setting.entity';
     InboundsModule,
   ],
   providers: [RotationService],
+  controllers: [RotationController],
 })
 export class RotationModule {}

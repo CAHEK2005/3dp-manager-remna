@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   AppBar, Toolbar, Typography, IconButton, Tooltip, Box,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Button, List, ListItem, ListItemText
@@ -16,10 +16,8 @@ export default function Header() {
   const { logout } = useAuth();
   const navigate = useNavigate();
 
-  // Состояние для модального окна справки
   const [helpOpen, setHelpOpen] = useState(false);
 
-  // Логика выхода
   const handleLogout = () => {
     if (confirm('Вы действительно хотите выйти?')) {
       logout();
@@ -57,21 +55,18 @@ export default function Header() {
 
           <Box sx={{ display: 'flex', gap: 1 }}>
 
-            {/* Кнопка Справки */}
             <Tooltip title="Справка о программе">
               <IconButton color="inherit" onClick={() => setHelpOpen(true)}>
                 <HelpOutline />
               </IconButton>
             </Tooltip>
 
-            {/* Кнопка Темы */}
             <Tooltip title={`Режим: ${getThemeLabel()}`}>
               <IconButton color="inherit" onClick={toggleColorMode}>
                 {getThemeIcon()}
               </IconButton>
             </Tooltip>
 
-            {/* Кнопка Выхода */}
             <Tooltip title="Выйти из системы">
               <IconButton color="inherit" onClick={handleLogout}>
                 <Logout />
@@ -82,7 +77,6 @@ export default function Header() {
         </Toolbar>
       </AppBar>
 
-      {/* Модальное окно справки */}
       <Dialog
         open={helpOpen}
         onClose={() => setHelpOpen(false)}

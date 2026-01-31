@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class InboundBuilderService {
-  private readonly flag = process.env.COUNTRY_FLAG ?? '%F0%9F%92%AF';
+  private flag = process.env.COUNTRY_FLAG ?? '%F0%9F%92%AF';
 
   buildVlessRealityTcp(params: { port: number; uuid: string; domain: string; privateKey: string; publicKey: string }) {
     const { port, uuid, domain, privateKey, publicKey } = params;
@@ -196,7 +196,8 @@ export class InboundBuilderService {
     return uuidv4();
   }
 
-  buildInboundLink(inbound: any, domain: string, idOrPass: string): string {
+  buildInboundLink(inbound: any, domain: string, idOrPass: string, flagEmoji: string): string {
+    this.flag = flagEmoji;
     let link = "";
 
     switch (inbound.protocol) {
@@ -286,7 +287,7 @@ export class InboundBuilderService {
       id: uuid,
       net: stream.network || "tcp",
       path: "/",
-      port: inbound.port,
+      port: inbound.port.toString(),
       ps: decodeURIComponent(this.flag) + ' ' + inbound.remark,
       scy: "",
       sni: "",

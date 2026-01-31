@@ -10,7 +10,6 @@ export class DomainsController {
     return this.domainsService.create(body);
   }
 
-  // Загрузка списка (массива строк)
   @Post('upload')
   uploadMany(@Body() body: { domains: string[] }) {
     return this.domainsService.createMany(body.domains);
@@ -21,7 +20,6 @@ export class DomainsController {
     @Query('page') page: number,
     @Query('limit') limit: number
   ) {
-    // Если параметры не передали, ставим дефолтные: стр 1, лимит 10
     const pageNum = page ? +page : 1;
     const limitNum = limit ? +limit : 10;
 
@@ -33,7 +31,6 @@ export class DomainsController {
     return this.domainsService.findOne(+id);
   }
 
-  // ВАЖНО: @Delete('all') должен идти ПЕРЕД @Delete(':id')
   @Delete('all')
   removeAll() {
     return this.domainsService.removeAll();

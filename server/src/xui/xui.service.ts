@@ -63,23 +63,50 @@ export class XuiService {
   }
 
   async addInbound(inboundConfig: any) {
-    try {
-      const res = await this.api.post('/panel/api/inbounds/add', inboundConfig);
-      if (res.data?.success) {
-        this.logger.log(res.data?.msg);
-        return res.data.obj.id;
-      } else {
-        this.logger.error(res.data?.msg);
-      }
-    } catch (e) {
-      this.logger.error(`Ошибка добавления инбаунда: ${e.message}`);
-      if (e.response?.status === 401) {
-        this.logger.log('Сессия истекла, пробуем релогин...');
-        if (await this.login()) {
-          return this.addInbound(inboundConfig);
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      
+      try {
+        const res = await this.api.post('/panel/api/inbounds/add', inboundConfig);
+
+        if (res.data?.success) {
+          return res.data.obj.id;
+        } 
+        
+        else {
+          const msg = res.data?.msg || '';
+          
+          if (
+            msg.toLowerCase().includes('port') && 
+            msg.toLowerCase().includes('exists')
+          ) {
+            this.logger.warn(`Попытка ${attempts}/${maxAttempts}: Порт ${inboundConfig.port} занят. Генерируем новый...`);
+            
+            inboundConfig.port = Math.floor(Math.random() * (60000 - 10000 + 1) + 10000);
+            
+          } else {
+            this.logger.error(`3x-ui отклонил создание: ${msg}`);
+            return null;
+          }
         }
+
+      } catch (e) {
+        if (e.response?.status === 401) {
+          this.logger.log('Сессия истекла, пробуем релогин...');
+          if (await this.login()) {
+            return this.addInbound(inboundConfig);
+          }
+        }
+        
+        this.logger.error(`Ошибка сети/валидации при добавлении инбаунда: ${e.message}`);
+        return null;
       }
     }
+
+    this.logger.error(`Не удалось создать инбаунд после ${maxAttempts} попыток смены порта.`);
     return null;
   }
 

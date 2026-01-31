@@ -2,7 +2,6 @@ import React, { createContext, useState, useMemo, useContext, useEffect } from '
 import { ThemeProvider as MuiThemeProvider, createTheme } from '@mui/material';
 import CssBaseline from '@mui/material/CssBaseline';
 import useMediaQuery from '@mui/material/useMediaQuery';
-// Импортируем нашу настройку
 import { getDesignTokens } from './theme'; 
 
 type ColorMode = 'light' | 'dark' | 'system';
@@ -17,7 +16,6 @@ const ThemeContext = createContext<ThemeContextType>({} as ThemeContextType);
 export const useThemeContext = () => useContext(ThemeContext);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Читаем из localStorage или ставим 'system'
   const [mode, setMode] = useState<ColorMode>(() => {
     return (localStorage.getItem('themeMode') as ColorMode) || 'system';
   });
@@ -36,7 +34,6 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   };
 
-  // Вычисляем реальную тему (light/dark) на основе настроек и системы
   const theme = useMemo(() => {
     let activeMode: ColorMode;
 
@@ -46,7 +43,6 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       activeMode = mode;
     }
 
-    // ВАЖНО: Используем нашу функцию getDesignTokens
     const themeOptions = getDesignTokens(activeMode);
     
     return createTheme(themeOptions);

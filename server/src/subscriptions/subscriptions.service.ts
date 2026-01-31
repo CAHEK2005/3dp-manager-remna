@@ -12,7 +12,6 @@ export class SubscriptionsService {
     @InjectRepository(Subscription)
     private subRepo: Repository<Subscription>,
     @InjectRepository(Inbound)
-    private inboundRepo: Repository<Inbound>,
     private xuiService: XuiService,
   ) {}
 

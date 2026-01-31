@@ -7,7 +7,7 @@ import { Setting } from '../settings/entities/setting.entity';
 import { SshService } from './ssh.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Tunnel, Setting])], // Setting нужен для xui_host
+  imports: [TypeOrmModule.forFeature([Tunnel, Setting])],
   controllers: [TunnelsController],
   providers: [TunnelsService, SshService],
 })

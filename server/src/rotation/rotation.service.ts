@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import { Subscription } from '../subscriptions/entities/subscription.entity';
 import { Inbound } from '../inbounds/entities/inbound.entity';
@@ -52,7 +52,7 @@ export class RotationService {
     await this.settingRepo.save(s);
   }
 
-  private async performRotation() {
+  async performRotation() {
     this.logger.log('Запуск плановой ротации...');
 
     const isLoginSuccess = await this.xuiService.login();
@@ -96,8 +96,8 @@ export class RotationService {
     const usedPorts = new Set<number>();
 
     const tasks = [
-      () => this.inboundBuilder.buildVlessRealityTcp({ port: 0, uuid: uuidv4(), domain: this.pickDomain(domains), ...keys }), // Port 8443 pref
-      () => this.inboundBuilder.buildVlessRealityXhttp({ port: 0, uuid: uuidv4(), domain: this.pickDomain(domains), ...keys }), // Port 443 pref
+      () => this.inboundBuilder.buildVlessRealityTcp({ port: 0, uuid: uuidv4(), domain: this.pickDomain(domains), ...keys }),
+      () => this.inboundBuilder.buildVlessRealityXhttp({ port: 0, uuid: uuidv4(), domain: this.pickDomain(domains), ...keys }),
       () => this.inboundBuilder.buildVlessRealityGrpc({ port: 0, uuid: uuidv4(), domain: this.pickDomain(domains), ...keys }),
       () => this.inboundBuilder.buildVlessWs({ port: 0, uuid: uuidv4(), domain: this.pickDomain(domains) }),
       () => this.inboundBuilder.buildVlessRealityTcp({ port: 0, uuid: uuidv4(), domain: this.pickDomain(domains), ...keys }),
@@ -110,6 +110,8 @@ export class RotationService {
 
     const host = await this.settingRepo.findOne({ where: { key: 'xui_host' } });
     const serverAddress = host?.value || 'localhost';
+    const flag = await this.settingRepo.findOne({ where: { key: 'xui_geo_flag' } });
+    const flagEmoji = flag?.value ?? '%F0%9F%92%AF';
 
     for (const [index, task] of tasks.entries()) {
       let config = task();
@@ -134,7 +136,7 @@ export class RotationService {
           else if (ss.tcpSettings?.header?.request?.headers?.Host?.[0]) domainForLink = ss.tcpSettings.header.request.headers.Host[0];
         } catch (e) { }
         const idOrPass = config.settings ? JSON.parse(config.settings).clients?.[0]?.id || JSON.parse(config.settings).clients?.[0]?.password : "";
-        const fullLink = this.inboundBuilder.buildInboundLink(config, serverAddress, idOrPass);
+        const fullLink = this.inboundBuilder.buildInboundLink(config, serverAddress, idOrPass, flagEmoji);
 
         const newInbound = this.inboundRepo.create({
           xuiId: xuiId,

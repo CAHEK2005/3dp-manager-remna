@@ -1,4 +1,3 @@
-import React from 'react';
 import { 
   Toolbar, Drawer, List, ListItem, 
   ListItemButton, ListItemIcon, ListItemText, Box 
@@ -6,7 +5,7 @@ import {
 import { People, Settings, Dns, SwapHoriz } from '@mui/icons-material';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 
-import Header from './Header'; // <--- Новый компонент
+import Header from './Header';
 import Footer from './Footer';
 
 const drawerWidth = 240;
@@ -25,10 +24,8 @@ export default function Layout() {
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
       
-      {/* Шапка */}
       <Header />
 
-      {/* Боковое меню */}
       <Drawer
         variant="permanent"
         sx={{
@@ -55,7 +52,6 @@ export default function Layout() {
         </Box>
       </Drawer>
 
-      {/* Основной контейнер контента */}
       <Box 
         component="main" 
         sx={{ 
@@ -68,12 +64,10 @@ export default function Layout() {
       >
         <Toolbar />
         
-        {/* Контент страницы */}
         <Box sx={{ flexGrow: 1, p: 3 }}>
           <Outlet />
         </Box>
 
-        {/* Футер */}
         <Footer />
       </Box>
     </Box>
