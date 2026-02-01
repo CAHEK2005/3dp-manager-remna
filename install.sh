@@ -262,7 +262,7 @@ EOF
 cat > docker-compose.yml <<EOF
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: 3dp-postgres
     restart: always
     environment:
@@ -278,6 +278,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - app-network
 
   backend:
     build: ./server
@@ -289,13 +291,15 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: admin
+      DB_USERNAME: admin
       DB_PASSWORD: ${DB_PASS}
       DB_NAME: 3dp_manager
       JWT_SECRET: ${JWT_SECRET}
       PORT: 3000
     ports:
       - "3000:3000"
+    networks:
+      - app-network
 
   frontend:
     build: ./client
@@ -308,9 +312,15 @@ services:
     volumes:
       - ${CERT_PATH}:/etc/nginx/certs/fullchain.pem:ro
       - ${KEY_PATH}:/etc/nginx/certs/privkey.pem:ro
+    networks:
+      - app-network
 
 volumes:
   pg_data:
+
+networks:
+  app-network:
+    driver: bridge
 EOF
 
 else
@@ -345,7 +355,7 @@ EOF
 cat > docker-compose.yml <<EOF
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: 3dp-postgres
     restart: always
     environment:
@@ -361,6 +371,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - app-network
 
   backend:
     build: ./server
@@ -372,13 +384,15 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: admin
+      DB_USERNAME: admin
       DB_PASSWORD: ${DB_PASS}
       DB_NAME: 3dp_manager
       JWT_SECRET: ${JWT_SECRET}
       PORT: 3000
     ports:
       - "3000:3000"
+    networks:
+      - app-network
 
   frontend:
     build: ./client
@@ -388,9 +402,15 @@ services:
       - backend
     ports:
       - "${FINAL_PORT}:${FINAL_PORT}"
+    networks:
+      - app-network
 
 volumes:
   pg_data:
+
+networks:
+  app-network:
+    driver: bridge
 EOF
 fi
 
@@ -414,4 +434,8 @@ if [[ "$USE_SSL" == "true" ]]; then
 else
     echo -e "${GREEN}✔ Установка завершена! Доступно по адресу: http://${UI_HOST}:${FINAL_PORT}${NC}"
 fi
+echo "Логин: admin"
+echo "Пароль: admin"
+echo ""
+echo "Немедленно измените пароль в Настройках утилиты!"
 echo "==================================================="
