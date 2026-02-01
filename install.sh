@@ -223,6 +223,14 @@ EXPOSE 3000
 CMD ["node", "dist/main"]
 EOF
 
+cat > server/.env <<EOF
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=admin
+DB_PASSWORD=${DB_PASS}
+DB_NAME=3dp_manager
+EOF
+
 if [[ "$USE_SSL" == "true" ]]; then
     # === ВАРИАНТ С SSL ===
     
@@ -279,11 +287,11 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_HOST: postgres
-      DATABASE_PORT: 5432
-      DATABASE_USER: admin
-      DATABASE_PASSWORD: ${DB_PASS}
-      DATABASE_NAME: 3dp_manager
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: admin
+      DB_PASSWORD: ${DB_PASS}
+      DB_NAME: 3dp_manager
       JWT_SECRET: ${JWT_SECRET}
       PORT: 3000
     ports:
@@ -362,11 +370,11 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_HOST: postgres
-      DATABASE_PORT: 5432
-      DATABASE_USER: admin
-      DATABASE_PASSWORD: ${DB_PASS}
-      DATABASE_NAME: 3dp_manager
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: admin
+      DB_PASSWORD: ${DB_PASS}
+      DB_NAME: 3dp_manager
       JWT_SECRET: ${JWT_SECRET}
       PORT: 3000
     ports:
