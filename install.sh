@@ -251,7 +251,7 @@ server {
     }
     location /api/ {
         proxy_pass http://backend:3000/api/;
-        proxy_set_header Host \$host;
+        proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     }
@@ -266,7 +266,7 @@ server {
 
     location / {
         proxy_pass http://backend:3000/;
-        proxy_set_header Host \$host;
+        proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
@@ -356,7 +356,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
+        proxy_set_header Host \$http_host;
         proxy_cache_bypass \$http_upgrade;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -367,7 +367,7 @@ server {
     server_name localhost;
     location / {
         proxy_pass http://backend:3000/;
-        proxy_set_header Host \$host;
+        proxy_set_header Host \$http_host;
     }
 }
 EOF

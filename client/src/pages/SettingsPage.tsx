@@ -22,7 +22,8 @@ export default function SettingsPage() {
   });
 
   const [msg, setMsg] = useState({ open: false, type: 'success' as 'success' | 'error', text: '' });
-  const [intervalError, setIntervalError] = useState('');
+  const [intervalError, setIntervalError] = useState<string>('');
+  const [loadingRotate, setLoadingRotate] = useState<boolean>(false);
 
   useEffect(() => {
     loadSettings();
@@ -36,6 +37,42 @@ export default function SettingsPage() {
       setIntervalError('');
     }
   }, [settings.rotation_interval]);
+
+  const cleanData = () => {
+    const cleaned = { ...settings };
+
+    if (cleaned.xui_url) {
+      cleaned.xui_url = cleaned.xui_url.replace(/\/+$/, '');
+    }
+
+    if (cleaned.xui_login) cleaned.xui_login = cleaned.xui_login.trim();
+    if (cleaned.xui_password) cleaned.xui_password = cleaned.xui_password.trim();
+
+    setSettings(prev => ({ ...prev, ...cleaned }));
+
+    return cleaned;
+  };
+
+  const handleCheckConnection = async () => {
+    const data = cleanData(); // Сначала чистим
+
+    try {
+      setMsg({ open: true, type: 'success', text: 'Проверка...' });
+      const res = await api.post('/settings/check', {
+        xui_url: data.xui_url,
+        xui_login: data.xui_login,
+        xui_password: data.xui_password
+      });
+
+      if (res.data.success) {
+        setMsg({ open: true, type: 'success', text: 'Подключение успешно!' });
+      } else {
+        setMsg({ open: true, type: 'error', text: 'Ошибка: Неверные данные или нет доступа' });
+      }
+    } catch (e) {
+      setMsg({ open: true, type: 'error', text: 'Ошибка сети при проверке' });
+    }
+  };
 
   const loadSettings = async () => {
     try {
@@ -64,8 +101,10 @@ export default function SettingsPage() {
       return;
     }
 
+    const data = cleanData();
+
     try {
-      await api.post('/settings', settings);
+      await api.post('/settings', data);
       setMsg({ open: true, type: 'success', text: 'Настройки сохранены!' });
     } catch (e) {
       setMsg({ open: true, type: 'error', text: 'Ошибка сохранения' });
@@ -86,13 +125,25 @@ export default function SettingsPage() {
     }
   };
 
-  const handleForceRotate = async () => {
+const handleForceRotate = async () => {
     if (confirm('ВНИМАНИЕ: Это немедленно обновит конфиги в подписках.\n\nИнтервал автоматической ротации НЕ будет сброшен.\n\nПродолжить?')) {
       try {
-        await api.post('/rotation/rotate-all');
-        setMsg({ open: true, type: 'success', text: 'Ротация успешно выполнена!' });
+        setLoadingRotate(true);
+        const res = await api.post('/rotation/rotate-all');
+        
+        setLoadingRotate(false);
+        if (res.data && res.data.success) {
+          setMsg({ open: true, type: 'success', text: res.data.message || 'Ротация успешно выполнена!' });
+        } else {
+          setMsg({ 
+            open: true, 
+            type: 'error', 
+            text: res.data?.message || 'Ошибка выполнения ротации' 
+          });
+        }
       } catch (e) {
-        setMsg({ open: true, type: 'error', text: 'Ошибка при запуске ротации' });
+        setLoadingRotate(false);
+        setMsg({ open: true, type: 'error', text: 'Ошибка сети или сервера' });
       }
     }
   };
@@ -111,7 +162,7 @@ export default function SettingsPage() {
             <TextField
               fullWidth margin="normal" label="URL панели"
               value={settings.xui_url} onChange={handleSettingChange('xui_url')}
-              helperText="Например: https://my-vpn.com:2053/panel_path"
+              helperText="Например: https://my-vpn.com:2053/wfgpoVHaOF"
             />
             <TextField
               fullWidth margin="normal" label="Логин 3x-ui"
@@ -125,6 +176,16 @@ export default function SettingsPage() {
             <Button variant="contained" sx={{ mt: 2 }} onClick={handleSaveSettings}>
               Сохранить подключение
             </Button>
+            {settings.xui_url && settings.xui_login && settings.xui_password && (
+              <Button
+                variant="outlined"
+                color="info"
+                sx={{ mt: 2, ml: 2 }}
+                onClick={handleCheckConnection}
+              >
+                Проверить
+              </Button>
+            )}
           </Paper>
         </Grid>
 
@@ -162,6 +223,7 @@ export default function SettingsPage() {
               </Button>
               <Button
                 variant="outlined"
+                loading={loadingRotate}
                 color="warning"
                 onClick={handleForceRotate}
                 sx={{ mt: 2, ml: 2 }}

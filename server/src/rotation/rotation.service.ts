@@ -58,16 +58,18 @@ export class RotationService {
     const isLoginSuccess = await this.xuiService.login();
     if (!isLoginSuccess) {
       this.logger.error('Отмена ротации: Не удалось войти в панель 3x-ui');
-      return;
+      return { success: false, message: 'Не удалось войти в панель 3x-ui' };
     }
 
     const subscriptions = await this.subRepo.find({ where: { isEnabled: true }, relations: ['inbounds'] });
-    if (subscriptions.length === 0) return;
+    if (subscriptions.length === 0) {
+      return { success: false, message: 'Нет активных подписок для ротации' };
+    }
 
     const domains = await this.domainRepo.find({ where: { isEnabled: true } });
     if (domains.length === 0) {
       this.logger.warn('Список доменов пуст! Ротация невозможна.');
-      return;
+      return { success: false, message: 'Список доменов пуст!' };
     }
 
     for (const sub of subscriptions) {
@@ -75,6 +77,7 @@ export class RotationService {
     }
 
     this.logger.log('Ротация завершена.');
+    return { success: true, message: 'Ротация успешно выполнена' };
   }
 
   private async rotateSubscription(sub: Subscription, domains: Domain[]) {
