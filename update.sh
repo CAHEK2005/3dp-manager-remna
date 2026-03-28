@@ -20,8 +20,16 @@ cd "$PROJECT_DIR"
 command -v docker >/dev/null 2>&1 || die "Docker не установлен"
 docker compose version >/dev/null 2>&1 || die "docker compose v2 недоступен"
 
+log "Сохранение конфигурации..."
+cp docker-compose.yml docker-compose.yml.bak
+cp client/nginx-client.conf client/nginx-client.conf.bak 2>/dev/null || true
+
 log "Получение последних изменений из репозитория..."
 git pull origin main
+
+log "Восстановление конфигурации..."
+cp docker-compose.yml.bak docker-compose.yml
+cp client/nginx-client.conf.bak client/nginx-client.conf 2>/dev/null || true
 
 log "Остановка контейнеров..."
 docker compose down --remove-orphans
