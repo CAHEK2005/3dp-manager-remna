@@ -29,7 +29,4 @@ docker compose down --remove-orphans
 log "Пересборка и перезапуск контейнеров..."
 docker compose up --build -d
 
-log "Очистка старых образов..."
-docker image prune -f
-
 log "RW Profile Manager успешно обновлён ✅"
