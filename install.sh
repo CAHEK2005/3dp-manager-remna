@@ -228,7 +228,8 @@ EOF
 # ЗАПУСК
 #################################
 log "Сборка и запуск контейнеров..."
-docker compose down || true
+docker compose down --remove-orphans || true
+docker rm -f rwm-postgres rwm-backend rwm-frontend 2>/dev/null || true
 docker compose up --build -d --remove-orphans
 docker image prune -f
 
