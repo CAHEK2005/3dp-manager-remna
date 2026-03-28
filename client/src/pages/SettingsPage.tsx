@@ -108,7 +108,7 @@ export default function SettingsPage() {
 
           {/* Tab 1: System */}
           <TabPanel value={tab} index={1}>
-            <Typography variant="h6" gutterBottom>Доступ к RW Profile Manager</Typography>
+            <Typography variant="h6" gutterBottom>Доступ к RWManager</Typography>
             <Divider sx={{ mb: 2 }} />
             <TextField
               fullWidth margin="normal" label="Логин администратора"

@@ -21,7 +21,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 # БАННЕР
 #################################
 echo "==================================================="
-echo "        RW Profile Manager — installer            "
+echo "        RWManager — installer            "
 echo "==================================================="
 echo ""
 

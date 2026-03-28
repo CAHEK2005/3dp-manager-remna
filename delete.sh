@@ -7,7 +7,7 @@ log()  { echo -e "\033[1;32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }
 die()  { echo -e "\033[1;31m[ERROR]\033[0m $1"; exit 1; }
 
-read -r -p "Вы уверены, что хотите удалить RW Profile Manager? (y/n): " answer
+read -r -p "Вы уверены, что хотите удалить RWManager? (y/n): " answer
 case "$answer" in
   y|Y) echo "Начинаю удаление..." ;;
   *)   echo "Удаление отменено"; exit 1 ;;
@@ -17,7 +17,7 @@ esac
 
 PROJECT_DIR="/opt/rwm-manager"
 
-log "Удаление RW Profile Manager..."
+log "Удаление RWManager..."
 
 if [[ ! -d "$PROJECT_DIR" ]]; then
     warn "Директория $PROJECT_DIR не найдена — удалять нечего"

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**RW Profile Manager** — утилита для автоматической ротации инбаундов в Remnawave (xray-based панель). Подключается к Remnawave по API-ключу, генерирует случайные инбаунды и обновляет config-профили по расписанию.
+**RWManager** — утилита для автоматической ротации инбаундов в Remnawave (xray-based панель). Подключается к Remnawave по API-ключу, генерирует случайные инбаунды и обновляет config-профили по расписанию.
 
 Стек: NestJS (backend) + React + Vite (frontend) + PostgreSQL, запускается через Docker Compose.
 

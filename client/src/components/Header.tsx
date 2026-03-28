@@ -60,7 +60,7 @@ export default function Header({ onMenuClick, isMobile }: HeaderProps) {
             </IconButton>
           )}
           <Typography variant={isMobile ? 'body1' : 'h6'} noWrap component="div" sx={{ flexGrow: 1, fontWeight: 'bold', color: '#1395de' }}>
-            RW Profile Manager
+            RWManager
           </Typography>
 
           <Box sx={{ display: 'flex', gap: isMobile ? 0.25 : 1 }}>
@@ -93,7 +93,7 @@ export default function Header({ onMenuClick, isMobile }: HeaderProps) {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>О программе RW Profile Manager</DialogTitle>
+        <DialogTitle>О программе RWManager</DialogTitle>
         <DialogContent dividers>
           <DialogContentText paragraph>
             Инструмент для автоматического обновления config-profile в панели Remnawave случайными инбаундами по расписанию.
@@ -125,7 +125,7 @@ export default function Header({ onMenuClick, isMobile }: HeaderProps) {
           </List>
 
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            RW Profile Manager
+            RWManager
           </Typography>
         </DialogContent>
         <DialogActions>

@@ -35,7 +35,7 @@ export default function LoginPage() {
         animation: 'fadeIn 1.5s ease-out',
         boxShadow: '0 15px 25px rgba(0,0,0,0.5)'
       }}>
-        <Typography variant="h5" gutterBottom align="center"><span style={{ verticalAlign: 'middle' }}>RW Profile Manager</span></Typography>
+        <Typography variant="h5" gutterBottom align="center"><span style={{ verticalAlign: 'middle' }}>RWManager</span></Typography>
 
 
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}

@@ -11,9 +11,9 @@ die()  { echo -e "\033[1;31m[ERROR]\033[0m $1"; exit 1; }
 
 PROJECT_DIR="/opt/rwm-manager"
 
-log "Обновление RW Profile Manager..."
+log "Обновление RWManager..."
 
-[[ -d "$PROJECT_DIR" ]] || die "RW Profile Manager не установлен ($PROJECT_DIR не найден)"
+[[ -d "$PROJECT_DIR" ]] || die "RWManager не установлен ($PROJECT_DIR не найден)"
 
 cd "$PROJECT_DIR"
 
@@ -29,4 +29,4 @@ docker compose down --remove-orphans
 log "Пересборка и перезапуск контейнеров..."
 docker compose up --build -d
 
-log "RW Profile Manager успешно обновлён ✅"
+log "RWManager успешно обновлён ✅"
