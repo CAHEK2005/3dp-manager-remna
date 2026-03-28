@@ -9,7 +9,7 @@ die()  { echo -e "\033[1;31m[ERROR]\033[0m $1"; exit 1; }
 
 [[ $EUID -eq 0 ]] || die "Запускать только от root"
 
-PROJECT_DIR="/opt/rw-manager"
+PROJECT_DIR="/opt/rwm-manager"
 
 log "Обновление RW Profile Manager..."
 

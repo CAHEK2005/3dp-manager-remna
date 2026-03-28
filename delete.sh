@@ -15,7 +15,7 @@ esac
 
 [[ $EUID -eq 0 ]] || die "Запускать только от root"
 
-PROJECT_DIR="/opt/rw-manager"
+PROJECT_DIR="/opt/rwm-manager"
 
 log "Удаление RW Profile Manager..."
 
@@ -33,13 +33,13 @@ if command -v docker &>/dev/null && docker compose version &>/dev/null; then
     fi
 fi
 
-log "Удаляем образы rw-manager..."
+log "Удаляем образы rwm-manager..."
 docker images --format '{{.Repository}} {{.ID}}' \
-    | grep -E 'rw-manager|rw-profile' \
+    | grep -E 'rwm-manager|rwm-profile' \
     | awk '{print $2}' \
     | xargs -r docker rmi -f || true
 
 log "Удаляем $PROJECT_DIR..."
 rm -rf "$PROJECT_DIR"
 
-log "✔ RW Profile Manager полностью удалён"
+log "✔ RWM Profile Manager полностью удалён"

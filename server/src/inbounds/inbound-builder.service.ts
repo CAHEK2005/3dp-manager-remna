@@ -9,7 +9,7 @@ export class InboundBuilderService {
   buildVlessRealityTcp(params: { port: number; uuid: string; sni: string; privateKey: string; publicKey: string }) {
     const { port, uuid, sni, privateKey, publicKey } = params;
     return {
-      tag: `vless-tcp-reality-rw-manager`,
+      tag: `vless-tcp-reality-rwm`,
       port,
       protocol: 'vless',
       settings: {
@@ -39,7 +39,7 @@ export class InboundBuilderService {
   buildVlessRealityXhttp(params: { port: number; uuid: string; sni: string; privateKey: string; publicKey: string }) {
     const { port, uuid, sni, privateKey, publicKey } = params;
     return {
-      tag: `vless-xhttp-reality-rw-manager`,
+      tag: `vless-xhttp-reality-rwm`,
       port,
       protocol: 'vless',
       settings: {
@@ -78,7 +78,7 @@ export class InboundBuilderService {
   buildVlessRealityGrpc(params: { port: number; uuid: string; sni: string; privateKey: string; publicKey: string }) {
     const { port, uuid, sni, privateKey, publicKey } = params;
     return {
-      tag: `vless-grpc-reality-rw-manager`,
+      tag: `vless-grpc-reality-rwm`,
       port,
       protocol: 'vless',
       settings: {
@@ -112,7 +112,7 @@ export class InboundBuilderService {
   buildVlessWs(params: { port: number; uuid: string; sni: string }) {
     const { port, uuid, sni } = params;
     return {
-      tag: `vless-ws-rw-manager`,
+      tag: `vless-ws-rwm`,
       port,
       protocol: 'vless',
       settings: {
@@ -157,7 +157,7 @@ export class InboundBuilderService {
   buildShadowsocksTcp(params: { port: number; uuid: string }) {
     const { port, uuid } = params;
     return {
-      tag: `shadowsocks-tcp-rw-manager`,
+      tag: `shadowsocks-tcp-rwm`,
       port,
       protocol: 'shadowsocks',
       settings: {
@@ -184,7 +184,7 @@ export class InboundBuilderService {
   buildTrojanRealityTcp(params: { port: number; uuid: string; sni: string; privateKey: string; publicKey: string }) {
     const { port, uuid, sni, privateKey, publicKey } = params;
     return {
-      tag: `trojan-tcp-reality-rw-manager`,
+      tag: `trojan-tcp-reality-rwm`,
       port,
       protocol: 'trojan',
       settings: {

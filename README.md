@@ -1,6 +1,6 @@
 # RW Profile Manager
 
-![Version](https://img.shields.io/badge/version-2.0.2-blue.svg) [![License](https://img.shields.io/badge/license-GPL%20V3-blue.svg?longCache=true)](https://www.gnu.org/licenses/gpl-3.0) [![Telegram](https://img.shields.io/badge/Telegram-26A5E4?style=flat&logo=telegram&logoColor=white)](https://t.me/denpiligrim_web) [![YouTube Channel Subscribers](https://img.shields.io/youtube/channel/subscribers/UCOv2tFFYDY4mXOM60PVz8zw)](https://www.youtube.com/@denpiligrim)
+![Version](https://img.shields.io/badge/version-2.0.2-blue.svg) [![License](https://img.shields.io/badge/license-GPL%20V3-blue.svg?longCache=true)](https://www.gnu.org/licenses/gpl-3.0)
 
 Утилита для автоматического обновления config-profile в панели [Remnawave](https://github.com/remnawave) случайными инбаундами по расписанию.
 
@@ -41,7 +41,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/CAHEK2005/3dp-manager-remna/
 ## Посмотреть логин и пароль
 
 ```bash
-grep -E "ADMIN_LOGIN|ADMIN_PASSWORD" /opt/rw-manager/server/.env
+grep -E "ADMIN_LOGIN|ADMIN_PASSWORD" /opt/rwm-manager/server/.env
 ```
 
 ---
@@ -52,7 +52,3 @@ NestJS (backend) + React + Vite (frontend) + PostgreSQL, запускается 
 
 ---
 
-## Обсуждение
-
-- Телеграм: [@denpiligrim_web](https://t.me/denpiligrim_web)
-- Issues: [github.com/CAHEK2005/3dp-manager-remna/issues](https://github.com/CAHEK2005/3dp-manager-remna/issues)

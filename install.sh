@@ -4,7 +4,7 @@ set -euo pipefail
 #################################
 # КОНФИГУРАЦИЯ
 #################################
-PROJECT_DIR="/opt/rw-manager"
+PROJECT_DIR="/opt/rwm-manager"
 REPO_URL="https://github.com/CAHEK2005/3dp-manager-remna.git"
 
 # Цвета
@@ -201,7 +201,7 @@ cat > docker-compose.yml <<EOF
 services:
   postgres:
     image: postgres:18-alpine
-    container_name: rw-postgres
+    container_name: rwm-postgres
     restart: always
     environment:
       POSTGRES_USER: admin
@@ -219,7 +219,7 @@ services:
 
   backend:
     build: ./server
-    container_name: rw-backend
+    container_name: rwm-backend
     restart: always
     depends_on:
       postgres:
@@ -239,7 +239,7 @@ services:
 
   frontend:
     build: ./client
-    container_name: rw-frontend
+    container_name: rwm-frontend
     restart: always
     depends_on:
       - backend
@@ -288,7 +288,7 @@ cat > docker-compose.yml <<EOF
 services:
   postgres:
     image: postgres:18-alpine
-    container_name: rw-postgres
+    container_name: rwm-postgres
     restart: always
     environment:
       POSTGRES_USER: admin
@@ -306,7 +306,7 @@ services:
 
   backend:
     build: ./server
-    container_name: rw-backend
+    container_name: rwm-backend
     restart: always
     depends_on:
       postgres:
@@ -326,7 +326,7 @@ services:
 
   frontend:
     build: ./client
-    container_name: rw-frontend
+    container_name: rwm-frontend
     restart: always
     depends_on:
       - backend

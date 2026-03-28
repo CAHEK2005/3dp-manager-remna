@@ -208,7 +208,7 @@ export class SettingsController {
     for (let i = 0; i < inbounds.length; i++) {
       const inbound = inbounds[i];
       const tag: string = inbound.tag || '';
-      const inboundType = tag.replace(/-rw-manager$/, '');
+      const inboundType = tag.replace(/-rwm$/, '');
 
       let remark = (profile.hostTemplate || '{countryCode} {nodeName} - {inboundType}')
         .replace('{countryCode}', countryCode)

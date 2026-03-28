@@ -15,8 +15,6 @@ jobs:
 
     environment:
       name: production
-      url: https://github.com/denpiligrim/3dp-manager/pkgs/container/3dp-manager-server
-      
     permissions:
       contents: read
       packages: write

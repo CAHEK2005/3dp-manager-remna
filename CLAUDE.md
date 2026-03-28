@@ -78,7 +78,7 @@ interface ManagedProfile {
 }
 ```
 
-Теги инбаундов в xray-конфиге имеют суффикс `-rw-manager` (например, `vless-tcp-reality-rw-manager`). `syncHosts` ищет инбаунд по `tag.startsWith(inboundType)`.
+Теги инбаундов в xray-конфиге имеют суффикс `-rwm` (например, `vless-tcp-reality-rwm`). `syncHosts` ищет инбаунд по `tag.startsWith(inboundType)`.
 
 Поддерживаемые типы инбаундов (`CONNECTION_TYPES` в `inbounds.constants.ts`): `vless-tcp-reality`, `vless-xhttp-reality`, `vless-grpc-reality`, `vless-ws`, `shadowsocks-tcp`, `trojan-tcp-reality`. Тип `custom` в `inboundsConfig` пропускается при генерации. Случайные порты выбираются из диапазона 10000–60000.
 
