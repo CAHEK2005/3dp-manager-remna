@@ -2,7 +2,7 @@ import {
   Toolbar, Drawer, List, ListItem,
   ListItemButton, ListItemIcon, ListItemText, Box, useMediaQuery, useTheme
 } from '@mui/material';
-import { Settings, Dns } from '@mui/icons-material';
+import { Layers, Dns, Settings } from '@mui/icons-material';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useState } from 'react';
 
@@ -22,9 +22,15 @@ export default function Layout() {
   };
 
   const menuItems = [
-    { text: 'Настройки', icon: <Settings />, path: '/' },
-    { text: 'Домены', icon: <Dns />, path: '/domains' },
+    { text: 'Профили',   icon: <Layers />,   path: '/' },
+    { text: 'Домены',    icon: <Dns />,      path: '/domains' },
+    { text: 'Настройки', icon: <Settings />, path: '/settings' },
   ];
+
+  const isActive = (path: string) => {
+    if (path === '/') return location.pathname === '/' || location.pathname === '/profiles';
+    return location.pathname === path;
+  };
 
   const drawerContent = (
     <Box sx={{ overflow: 'auto' }}>
@@ -33,7 +39,7 @@ export default function Layout() {
         {menuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
             <ListItemButton
-              selected={location.pathname === item.path}
+              selected={isActive(item.path)}
               onClick={() => {
                 navigate(item.path);
                 if (isMobile) setMobileOpen(false);

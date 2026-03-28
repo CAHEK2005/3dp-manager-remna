@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
+import ProfilesPage from './pages/ProfilesPage';
 import SettingsPage from './pages/SettingsPage';
 import DomainsPage from './pages/DomainsPage';
 import LoginPage from './pages/LoginPage';
@@ -26,7 +27,8 @@ function App() {
                 <Layout />
               </RequireAuth>
             }>
-              <Route index element={<SettingsPage />} />
+              <Route index element={<ProfilesPage />} />
+              <Route path="profiles" element={<ProfilesPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="domains" element={<DomainsPage />} />
             </Route>

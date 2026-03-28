@@ -19,5 +19,6 @@ import { Setting } from '../settings/entities/setting.entity';
   ],
   providers: [RotationService],
   controllers: [RotationController],
+  exports: [RotationService],
 })
 export class RotationModule {}

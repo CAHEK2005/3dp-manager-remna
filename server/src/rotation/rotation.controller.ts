@@ -7,6 +7,6 @@ export class RotationController {
 
   @Post('rotate-all')
   async rotateAll() {
-    return this.rotationService.performRotation();
+    return this.rotationService.rotateAllProfiles();
   }
 }

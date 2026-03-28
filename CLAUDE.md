@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**3DP-Manager** — утилита для автогенерации инбаундов в панели 3x-ui, формирования единых подписок и настройки перенаправления трафика с промежуточных серверов.
+**RW Profile Manager** — утилита для автоматической ротации инбаундов в Remnawave (xray-based панель). Подключается к Remnawave по API-ключу, генерирует случайные инбаунды и обновляет config-профили по расписанию.
 
 Стек: NestJS (backend) + React + Vite (frontend) + PostgreSQL, запускается через Docker Compose.
 
@@ -14,11 +14,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm run start:dev     # Запуск в режиме разработки (watch)
 npm run build         # Компиляция TypeScript → dist/
-npm run start:prod    # Запуск скомпилированного приложения
 npm run lint          # ESLint с автофиксом
 npm run test          # Jest unit тесты
-npm run test:watch    # Jest в watch режиме
-npm run test:cov      # Покрытие кода
 npm run test:e2e      # E2E тесты (supertest)
 ```
 
@@ -26,13 +23,12 @@ npm run test:e2e      # E2E тесты (supertest)
 ```bash
 npm run dev           # Vite dev server с HMR
 npm run build         # Сборка для продакшна
-npm run preview       # Предпросмотр продакшн-сборки
 npm run lint          # ESLint проверка
 ```
 
 ### Docker (полный стек)
 ```bash
-docker-compose up --build   # Запуск всех сервисов
+docker-compose up --build
 ```
 
 ## Architecture
@@ -44,40 +40,75 @@ React (Nginx :80) → NestJS API (:3000) → PostgreSQL (:5432)
 
 - Frontend проксирует `/api/` на `http://server:3000` через Nginx
 - Глобальный префикс API: `/api`
-- Публичный URL подписки (без аутентификации): `GET /bus/:uuid` и `GET /bus/:uuid/:tunnelId`
 
 ### Backend (NestJS, feature-based модули)
 
 Модули в `server/src/`:
 - **auth** — JWT-аутентификация через Passport. Глобальный `JwtAuthGuard`, декоратор `@Public()` для публичных маршрутов. Единственный администратор сидируется из ENV при старте через `AuthService.seedAdmin()`.
-- **xui** — интеграция с 3x-ui API (логин, добавление/удаление инбаундов, retry при занятых портах)
-- **subscriptions** — CRUD подписок; инбаунды хранятся как JSON в поле `inboundsConfig`
-- **inbounds** — управление инбаундами в БД (связь с 3x-ui через `xuiId`)
-- **rotation** — ротация (пересоздание) всех инбаундов по расписанию
-- **domains** — белый список доменов для SNI
-- **tunnels** — SSH-туннели (установка форвардинг-скриптов на удалённых серверах через `ssh2`)
-- **settings** — конфигурация 3x-ui хранится как key-value в БД (не в .env)
+- **remnawave** — HTTP-клиент к Remnawave API (Bearer токен). Все запросы читают `remnawave_url` и `remnawave_api_key` из БД при каждом вызове. Методы: `getConfigProfiles`, `updateConfigProfile`, `createConfigProfile`, `deleteConfigProfile`, `renameConfigProfile`, `getNodes`, `getAllHosts`, `createHost`, `updateHost`, `getX25519Keys`, `applyProfileToNode`, `checkConnection`.
+- **inbounds** — `InboundBuilderService` строит JSON-объекты инбаундов для xray-core (vless-reality-tcp/xhttp/grpc, vless-ws, shadowsocks-tcp, trojan-reality-tcp). Также генерирует share-ссылки (vless://, vmess://, ss://, trojan://).
+- **rotation** — `RotationService` хранит список `ManagedProfile[]` как JSON в `Setting.key = 'managed_profiles'`. Cron каждую минуту проверяет, какие профили пора ротировать. Поддерживает два режима: `interval` (минуты) и `schedule` (HH:MM + timezone). `performRotation`: генерирует инбаунды → обновляет профиль в Remnawave → `syncHosts` → `applyProfileToNode`.
+- **settings** — CRUD key-value настроек в БД + прокси к Remnawave API (profiles, nodes, hosts). При сохранении `remnawave_url` автоматически определяет GeoIP страны через `ip-api.com`.
+- **domains** — CRUD белого списка доменов для SNI (используются при `sni: 'random'` в inboundsConfig).
 
-### Frontend (React 19 + MUI)
+### ManagedProfile (ключевой тип)
 
-Структура в `client/src/`:
-- **api.ts** — единственный Axios-инстанс с `baseURL` на `/api`
-- **auth/** — `AuthContext` (JWT в localStorage), `RequireAuth`, `PublicRoute`, `AxiosInterceptor` (редирект на логин при 401)
-- **pages/** — `SubscriptionsPage`, `DomainsPage`, `TunnelsPage`, `SettingsPage`, `LoginPage`
-- **components/** — `Layout`, `Header`, `Footer`
+```typescript
+interface ManagedProfile {
+  uuid: string;              // UUID профиля в Remnawave
+  name: string;
+  inboundsConfig: any[];     // [{type, port, sni}, ...] — конфигурация генерации
+  nodeUuid: string;          // UUID ноды Remnawave
+  nodeAddress: string;
+  applyToNode: boolean;      // применять профиль к ноде после ротации
+  hostMappings: { inboundType: string; hostUuid: string }[];  // UUID хостов для syncHosts
+  hostTemplate: string;      // шаблон remark: '{countryCode} {nodeName} - {inboundType}'
+  rotationEnabled: boolean;
+  rotationMode: 'interval' | 'schedule';
+  rotationInterval: number;  // минуты
+  rotationScheduleTime: string; // 'HH:MM'
+  rotationTimezone: string;
+  lastRotationTimestamp: number;
+  lastRotationStatus: 'success' | 'error' | null;
+  lastRotationError: string;
+}
+```
 
-Управление состоянием: только React Context + локальный `useState` (нет Redux/Zustand).
+Теги инбаундов в xray-конфиге имеют суффикс `-rw-manager` (например, `vless-tcp-reality-rw-manager`). `syncHosts` ищет инбаунд по `tag.startsWith(inboundType)`.
+
+### Remnawave API endpoints (используемые)
+
+- `GET /api/config-profiles` — список профилей; ответ: `{ response: { configProfiles: [] } }`
+- `POST /api/config-profiles` — создание; `PATCH /api/config-profiles` body: `{ uuid, config }` или `{ uuid, name }` — обновление конфига/имени
+- `DELETE /api/config-profiles/:uuid`
+- `GET /api/nodes`; `POST /api/nodes/bulk-actions/profile-modification`
+- `GET /api/hosts`; `POST /api/hosts`; `PATCH /api/hosts` body: `{ uuid, ...fields }`
+- `GET /api/system/tools/x25519/generate` — ответ: `{ response: { keypairs: [{ publicKey, privateKey }] } }`
 
 ### База данных (TypeORM + PostgreSQL)
 
 Сущности:
-- **Setting** — key-value хранилище конфигурации (включая URL и credentials 3x-ui)
-- **Subscription** — подписка с полем `inboundsConfig: JSON[]` и связью OneToMany с Inbound
-- **Inbound** — инбаунд в 3x-ui (`xuiId`, `port`, `protocol`, `link`), ManyToOne к Subscription
-- **Domain** — доменное имя для белого списка SNI
-- **Tunnel** — SSH-туннель (credentials хранятся с `select: false`)
+- **Setting** — key-value хранилище всей конфигурации. Ключевые записи: `remnawave_url`, `remnawave_api_key`, `managed_profiles` (JSON), `remnawave_geo_flag`, `remnawave_geo_country`.
+- **Domain** — доменное имя для белого списка SNI (`name`, `isEnabled`).
 
-### Переменные окружения (server/.env)
+`synchronize: true` — TypeORM автоматически синхронизирует схему (только две сущности: Setting, Domain).
+
+### Frontend (React 19 + MUI)
+
+Структура `client/src/`:
+- **api.ts** — единственный Axios-инстанс с `baseURL: '/api'`
+- **auth/** — `AuthContext` (JWT в localStorage), `RequireAuth`, `PublicRoute`, `AxiosInterceptor` (редирект на `/login` при 401)
+- **ThemeContext.tsx** — переключение светлой/тёмной темы MUI
+- **pages/**:
+  - `ProfilesPage` — главная страница, управление ManagedProfiles (CRUD, ротация, создание хостов)
+  - `SettingsPage` — настройки подключения к Remnawave + общие параметры
+  - `DomainsPage` — белый список доменов SNI
+  - `LoginPage`, `NotFoundPage`
+- **components/** — `Layout` (Outlet + nav), `Header`, `Footer`
+
+Управление состоянием: только React Context + локальный `useState`.
+
+### Переменные окружения (`server/.env`)
 
 ```
 DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_NAME
@@ -85,4 +116,4 @@ ADMIN_LOGIN, ADMIN_PASSWORD
 JWT_SECRET
 ```
 
-Настройки подключения к 3x-ui хранятся в БД (таблица settings), а не в .env.
+Настройки подключения к Remnawave хранятся в БД (таблица `settings`), не в `.env`.

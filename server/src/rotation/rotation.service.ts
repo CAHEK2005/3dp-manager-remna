@@ -9,6 +9,25 @@ import { Setting } from '../settings/entities/setting.entity';
 import { RemnavaveService } from '../remnawave/remnawave.service';
 import { InboundBuilderService } from '../inbounds/inbound-builder.service';
 
+export interface ManagedProfile {
+  uuid: string;
+  name: string;
+  inboundsConfig: any[];
+  nodeUuid: string;
+  nodeAddress: string;
+  applyToNode: boolean;
+  hostMappings: { inboundType: string; hostUuid: string }[];
+  hostTemplate: string;
+  rotationEnabled: boolean;
+  rotationMode: 'interval' | 'schedule';
+  rotationInterval: number;
+  rotationScheduleTime: string;
+  rotationTimezone: string;
+  lastRotationTimestamp: number;
+  lastRotationStatus: 'success' | 'error' | null;
+  lastRotationError: string;
+}
+
 @Injectable()
 export class RotationService implements OnModuleInit {
   private readonly logger = new Logger(RotationService.name);
@@ -25,35 +44,66 @@ export class RotationService implements OnModuleInit {
   }
 
   private async initDefaultSettings() {
-    const key = 'rotation_status';
-    const existing = await this.settingRepo.findOne({ where: { key } });
+    const key = 'managed_profiles';
+    let existing = await this.settingRepo.findOne({ where: { key } });
     if (!existing) {
-      this.logger.log(`Инициализация настройки: ${key} = active`);
-      await this.settingRepo.save(this.settingRepo.create({ key, value: 'active' }));
-    } else {
-      this.logger.log(`Текущий статус ротации: ${existing.value}`);
+      this.logger.log(`Инициализация настройки: ${key} = []`);
+      await this.settingRepo.save(this.settingRepo.create({ key, value: '[]' }));
+      existing = await this.settingRepo.findOne({ where: { key } });
     }
-  }
 
-  @Cron(CronExpression.EVERY_MINUTE)
-  async handleTicker() {
-    const intervalSetting = await this.settingRepo.findOne({ where: { key: 'rotation_interval' } });
-    const intervalMinutes = intervalSetting ? parseInt(intervalSetting.value, 10) : 30;
+    // Миграция: если managed_profiles == '[]' и remnawave_profile_uuid задан
+    if (existing?.value === '[]') {
+      const profileUuidSetting = await this.settingRepo.findOne({ where: { key: 'remnawave_profile_uuid' } });
+      if (profileUuidSetting?.value) {
+        const getKey = async (k: string): Promise<string> => {
+          const s = await this.settingRepo.findOne({ where: { key: k } });
+          return s?.value || '';
+        };
 
-    const lastRunSetting = await this.settingRepo.findOne({ where: { key: 'last_rotation_timestamp' } });
-    const lastRun = lastRunSetting ? parseInt(lastRunSetting.value, 10) : 0;
+        let inboundsConfig: any[] = [];
+        try {
+          inboundsConfig = JSON.parse((await getKey('inbounds_config')) || '[]');
+        } catch { /* ignore */ }
 
-    const now = Date.now();
-    const diffMinutes = (now - lastRun) / 1000 / 60;
+        let hostMappings: { inboundType: string; hostUuid: string }[] = [];
+        try {
+          const oldMappings = JSON.parse((await getKey('host_mappings')) || '[]');
+          if (oldMappings.length > 0 && inboundsConfig.length > 0) {
+            hostMappings = oldMappings
+              .filter((m: any) => m.inboundIndex !== undefined && inboundsConfig[m.inboundIndex])
+              .map((m: any) => ({
+                inboundType: inboundsConfig[m.inboundIndex].type,
+                hostUuid: m.hostUuid,
+              }));
+          }
+        } catch { /* ignore */ }
 
-    const statusSetting = await this.settingRepo.findOne({ where: { key: 'rotation_status' } });
-    const isStopped = statusSetting?.value === 'stopped';
+        const migrated: ManagedProfile = {
+          uuid: profileUuidSetting.value,
+          name: 'Default',
+          inboundsConfig,
+          nodeUuid: await getKey('remnawave_node_uuid'),
+          nodeAddress: await getKey('remnawave_node_address'),
+          applyToNode: false,
+          hostMappings,
+          hostTemplate: '{countryCode} {nodeName} - {inboundType}',
+          rotationEnabled: true,
+          rotationMode: 'interval',
+          rotationInterval: 1440,
+          rotationScheduleTime: '03:00',
+          rotationTimezone: 'Europe/Moscow',
+          lastRotationTimestamp: 0,
+          lastRotationStatus: null,
+          lastRotationError: '',
+        };
 
-    if (diffMinutes < intervalMinutes || isStopped) return;
-
-    const result = await this.performRotation();
-    if (result.success) {
-      await this.saveSetting('last_rotation_timestamp', now.toString());
+        await this.saveSetting('managed_profiles', JSON.stringify([migrated]));
+        this.logger.log(`Миграция: создан профиль Default из старых настроек (uuid=${migrated.uuid})`);
+      }
+    } else {
+      const count = JSON.parse(existing?.value || '[]').length;
+      this.logger.log(`Текущее количество managed_profiles: ${count}`);
     }
   }
 
@@ -64,173 +114,236 @@ export class RotationService implements OnModuleInit {
     await this.settingRepo.save(s);
   }
 
-  async performRotation() {
-    this.logger.log('Запуск ротации...');
-
-    const profileUuidSetting = await this.settingRepo.findOne({ where: { key: 'remnawave_profile_uuid' } });
-    if (!profileUuidSetting?.value) {
-      this.logger.error('Не задан remnawave_profile_uuid');
-      return { success: false, message: 'Не задан UUID профиля Remnawave' };
-    }
-    const profileUuid = profileUuidSetting.value;
-
-    const inboundsConfigSetting = await this.settingRepo.findOne({ where: { key: 'inbounds_config' } });
-    let inboundsConfig: any[] = [];
-    if (inboundsConfigSetting?.value) {
-      try {
-        inboundsConfig = JSON.parse(inboundsConfigSetting.value);
-      } catch {
-        this.logger.error('Ошибка парсинга inbounds_config');
-        return { success: false, message: 'Неверный формат inbounds_config' };
-      }
-    }
-
-    if (inboundsConfig.length === 0) {
-      return { success: false, message: 'Список инбаундов пуст' };
-    }
-
-    let keys: { publicKey: string; privateKey: string };
+  async loadProfiles(): Promise<ManagedProfile[]> {
+    const raw = await this.settingRepo.findOne({ where: { key: 'managed_profiles' } });
     try {
-      keys = await this.remnavaveService.getX25519Keys();
-    } catch (e) {
-      this.logger.error('Не удалось получить X25519 ключи', e);
-      return { success: false, message: 'Ошибка получения X25519 ключей' };
+      return JSON.parse(raw?.value || '[]');
+    } catch {
+      return [];
     }
-
-    const domains = await this.domainRepo.find({ where: { isEnabled: true } });
-    const generatedInbounds: any[] = [];
-    const usedPorts = new Set<number>();
-
-    for (const config of inboundsConfig) {
-      const type = config.type;
-      if (type === 'custom') continue;
-
-      const uuid = uuidv4();
-
-      let port: number;
-      if (!config.port || config.port === 'random') {
-        port = this.getRandomPort(usedPorts);
-      } else {
-        port = typeof config.port === 'string' ? parseInt(config.port, 10) : config.port;
-      }
-      usedPorts.add(port);
-
-      const sni = config.sni === 'random' ? this.pickDomain(domains) : (config.sni || '');
-
-      let inbound: any;
-      switch (type) {
-        case 'vless-tcp-reality':
-          inbound = this.inboundBuilder.buildVlessRealityTcp({ port, uuid, sni, ...keys });
-          break;
-        case 'vless-xhttp-reality':
-          inbound = this.inboundBuilder.buildVlessRealityXhttp({ port, uuid, sni, ...keys });
-          break;
-        case 'vless-grpc-reality':
-          inbound = this.inboundBuilder.buildVlessRealityGrpc({ port, uuid, sni, ...keys });
-          break;
-        case 'vless-ws':
-          inbound = this.inboundBuilder.buildVlessWs({ port, uuid, sni });
-          break;
-        case 'shadowsocks-tcp':
-          inbound = this.inboundBuilder.buildShadowsocksTcp({ port, uuid });
-          break;
-        case 'trojan-tcp-reality':
-          inbound = this.inboundBuilder.buildTrojanRealityTcp({ port, uuid, sni, ...keys });
-          break;
-        default:
-          this.logger.warn(`Неизвестный тип инбаунда: ${type}`);
-          continue;
-      }
-
-      if (inbound) generatedInbounds.push(inbound);
-    }
-
-    let currentProfile: any;
-    try {
-      currentProfile = await this.remnavaveService.getConfigProfile(profileUuid);
-    } catch (e) {
-      this.logger.error('Не удалось получить профиль', e);
-      return { success: false, message: 'Ошибка получения профиля из Remnawave' };
-    }
-
-    const mergedConfig = {
-      ...(currentProfile?.config || {}),
-      inbounds: generatedInbounds,
-      outbounds: [
-        { tag: 'DIRECT', protocol: 'freedom' },
-        { tag: 'BLOCK', protocol: 'blackhole' },
-      ],
-      routing: {
-        rules: [
-          { type: 'field', ip: ['geoip:private'], outboundTag: 'BLOCK' },
-          { type: 'field', domain: ['geosite:private'], outboundTag: 'BLOCK' },
-          { type: 'field', protocol: ['bittorrent'], outboundTag: 'BLOCK' },
-        ],
-      },
-    };
-
-    let updatedProfile: any;
-    try {
-      updatedProfile = await this.remnavaveService.updateConfigProfile(profileUuid, mergedConfig);
-    } catch (e) {
-      this.logger.error('Не удалось обновить профиль', e);
-      return { success: false, message: `Ошибка обновления профиля: ${e.message}` };
-    }
-
-    await this.syncHosts(profileUuid, updatedProfile?.inbounds || []);
-
-    await this.saveSetting('last_rotation_timestamp', Date.now().toString());
-
-    this.logger.log(`Ротация завершена. Обновлено ${generatedInbounds.length} инбаундов.`);
-    return { success: true, message: `Ротация выполнена: ${generatedInbounds.length} инбаундов обновлено` };
   }
 
-  private async syncHosts(profileUuid: string, updatedInbounds: any[]) {
-    const mappingsSetting = await this.settingRepo.findOne({ where: { key: 'host_mappings' } });
-    const nodeAddressSetting = await this.settingRepo.findOne({ where: { key: 'remnawave_node_address' } });
-    const nodeUuidSetting = await this.settingRepo.findOne({ where: { key: 'remnawave_node_uuid' } });
+  async saveProfiles(profiles: ManagedProfile[]): Promise<void> {
+    await this.saveSetting('managed_profiles', JSON.stringify(profiles));
+  }
 
-    if (!mappingsSetting?.value || !nodeAddressSetting?.value || !nodeUuidSetting?.value) {
-      this.logger.warn('syncHosts: маппинг хостов или нода не настроены — пропускаем синхронизацию хостов');
-      return;
+  @Cron(CronExpression.EVERY_MINUTE)
+  async handleTicker() {
+    const profiles = await this.loadProfiles();
+    if (!profiles.length) return;
+
+    let updated = false;
+    const updatedProfiles = [...profiles];
+
+    for (let i = 0; i < profiles.length; i++) {
+      const p = profiles[i];
+      if (!p.rotationEnabled) continue;
+      if (!this.isDue(p)) continue;
+
+      const result = await this.performRotation(p);
+      updatedProfiles[i] = {
+        ...p,
+        lastRotationTimestamp: result.success ? Date.now() : p.lastRotationTimestamp,
+        lastRotationStatus: result.success ? 'success' : 'error',
+        lastRotationError: result.success ? '' : result.message,
+      };
+      updated = true;
     }
 
-    let mappings: { inboundIndex: number; hostUuid: string }[] = [];
+    if (updated) await this.saveProfiles(updatedProfiles);
+  }
+
+  private isDue(p: ManagedProfile): boolean {
+    if (p.rotationMode === 'interval') {
+      const diffMin = (Date.now() - (p.lastRotationTimestamp || 0)) / 60000;
+      return diffMin >= (p.rotationInterval || 1440);
+    } else {
+      return this.isScheduleDue(p);
+    }
+  }
+
+  private isScheduleDue(p: ManagedProfile): boolean {
+    const now = new Date();
+    const tz = p.rotationTimezone || 'Europe/Moscow';
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      hour: '2-digit', minute: '2-digit', hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => parts.find(x => x.type === t)?.value || '';
+    const currentTime = `${get('hour')}:${get('minute')}`;
+    const currentDate = `${get('year')}-${get('month')}-${get('day')}`;
+    if (currentTime !== p.rotationScheduleTime) return false;
+    if (!p.lastRotationTimestamp) return true;
+    const lastDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(p.lastRotationTimestamp));
+    return lastDate !== currentDate;
+  }
+
+  async rotateAllProfiles(): Promise<{ success: boolean; message: string }> {
+    const profiles = await this.loadProfiles();
+    let successCount = 0;
+    const updated = [...profiles];
+
+    for (let i = 0; i < profiles.length; i++) {
+      if (!profiles[i].rotationEnabled) continue;
+      const result = await this.performRotation(profiles[i]);
+      updated[i] = {
+        ...profiles[i],
+        lastRotationTimestamp: result.success ? Date.now() : profiles[i].lastRotationTimestamp,
+        lastRotationStatus: result.success ? 'success' : 'error',
+        lastRotationError: result.success ? '' : result.message,
+      };
+      if (result.success) successCount++;
+    }
+
+    await this.saveProfiles(updated);
+    return { success: true, message: `Ротация выполнена: ${successCount}/${profiles.length}` };
+  }
+
+  async performRotation(profile: ManagedProfile): Promise<{ success: boolean; message: string }> {
     try {
-      mappings = JSON.parse(mappingsSetting.value);
-    } catch {
-      this.logger.warn('syncHosts: не удалось распарсить host_mappings');
+      this.logger.log(`Запуск ротации профиля: ${profile.name} (${profile.uuid})`);
+
+      if (!profile.uuid) {
+        return { success: false, message: 'Не задан UUID профиля' };
+      }
+      if (!profile.inboundsConfig || profile.inboundsConfig.length === 0) {
+        return { success: false, message: 'Список инбаундов пуст' };
+      }
+
+      let keys: { publicKey: string; privateKey: string };
+      try {
+        keys = await this.remnavaveService.getX25519Keys();
+      } catch {
+        return { success: false, message: 'Ошибка получения X25519 ключей' };
+      }
+
+      const domains = await this.domainRepo.find({ where: { isEnabled: true } });
+      const generatedInbounds: any[] = [];
+      const usedPorts = new Set<number>();
+
+      for (const config of profile.inboundsConfig) {
+        const type = config.type;
+        if (type === 'custom') continue;
+
+        const uuid = uuidv4();
+        let port: number;
+        if (!config.port || config.port === 'random') {
+          port = this.getRandomPort(usedPorts);
+        } else {
+          port = typeof config.port === 'string' ? parseInt(config.port, 10) : config.port;
+        }
+        usedPorts.add(port);
+
+        const sni = config.sni === 'random' ? this.pickDomain(domains) : (config.sni || '');
+
+        let inbound: any;
+        switch (type) {
+          case 'vless-tcp-reality':
+            inbound = this.inboundBuilder.buildVlessRealityTcp({ port, uuid, sni, ...keys });
+            break;
+          case 'vless-xhttp-reality':
+            inbound = this.inboundBuilder.buildVlessRealityXhttp({ port, uuid, sni, ...keys });
+            break;
+          case 'vless-grpc-reality':
+            inbound = this.inboundBuilder.buildVlessRealityGrpc({ port, uuid, sni, ...keys });
+            break;
+          case 'vless-ws':
+            inbound = this.inboundBuilder.buildVlessWs({ port, uuid, sni });
+            break;
+          case 'shadowsocks-tcp':
+            inbound = this.inboundBuilder.buildShadowsocksTcp({ port, uuid });
+            break;
+          case 'trojan-tcp-reality':
+            inbound = this.inboundBuilder.buildTrojanRealityTcp({ port, uuid, sni, ...keys });
+            break;
+          default:
+            this.logger.warn(`Неизвестный тип инбаунда: ${type}`);
+            continue;
+        }
+
+        if (inbound) generatedInbounds.push(inbound);
+      }
+
+      let currentProfile: any;
+      try {
+        currentProfile = await this.remnavaveService.getConfigProfile(profile.uuid);
+      } catch {
+        return { success: false, message: 'Ошибка получения профиля из Remnawave' };
+      }
+
+      const mergedConfig = {
+        ...(currentProfile?.config || {}),
+        inbounds: generatedInbounds,
+        outbounds: [
+          { tag: 'DIRECT', protocol: 'freedom' },
+          { tag: 'BLOCK', protocol: 'blackhole' },
+        ],
+        routing: {
+          rules: [
+            { type: 'field', ip: ['geoip:private'], outboundTag: 'BLOCK' },
+            { type: 'field', domain: ['geosite:private'], outboundTag: 'BLOCK' },
+            { type: 'field', protocol: ['bittorrent'], outboundTag: 'BLOCK' },
+          ],
+        },
+      };
+
+      let updatedProfile: any;
+      try {
+        updatedProfile = await this.remnavaveService.updateConfigProfile(profile.uuid, mergedConfig);
+      } catch (e) {
+        return { success: false, message: `Ошибка обновления профиля: ${e?.message}` };
+      }
+
+      const updatedInbounds = updatedProfile?.inbounds || [];
+      await this.syncHosts(profile.uuid, updatedInbounds, profile);
+
+      if (profile.applyToNode && profile.nodeUuid && updatedInbounds.length > 0) {
+        try {
+          const inboundUuids = updatedInbounds.map((i: any) => i.uuid).filter(Boolean);
+          if (inboundUuids.length > 0) {
+            await this.remnavaveService.applyProfileToNode(profile.nodeUuid, profile.uuid, inboundUuids);
+          }
+        } catch (e) {
+          this.logger.warn(`applyProfileToNode failed: ${e?.message}`);
+        }
+      }
+
+      this.logger.log(`Ротация профиля ${profile.name} завершена. Инбаундов: ${generatedInbounds.length}`);
+      return { success: true, message: `Ротация выполнена: ${generatedInbounds.length} инбаундов обновлено` };
+    } catch (e) {
+      return { success: false, message: e?.message || String(e) };
+    }
+  }
+
+  private async syncHosts(profileUuid: string, updatedInbounds: any[], profile: ManagedProfile) {
+    if (!profile.hostMappings || profile.hostMappings.length === 0) {
+      this.logger.warn('syncHosts: hostMappings пуст — пропускаем');
       return;
     }
 
-    if (mappings.length === 0) {
-      this.logger.warn('syncHosts: host_mappings пуст — пропускаем');
-      return;
-    }
-
-    const nodeAddress = nodeAddressSetting.value;
-    const nodeUuid = nodeUuidSetting.value;
     let updatedCount = 0;
-
-    for (const { inboundIndex, hostUuid } of mappings) {
-      const inbound = updatedInbounds[inboundIndex];
+    for (const { inboundType, hostUuid } of profile.hostMappings) {
+      const inbound = updatedInbounds.find((i: any) => i.tag?.startsWith(inboundType));
       if (!inbound) {
-        this.logger.warn(`syncHosts: инбаунд с индексом ${inboundIndex} не найден — пропускаем`);
+        this.logger.warn(`syncHosts: инбаунд типа ${inboundType} не найден — пропускаем`);
         continue;
       }
 
       const port = inbound.port ?? inbound.rawInbound?.port;
-      this.logger.debug(`syncHosts: хост ${hostUuid} → inbound[${inboundIndex}] uuid=${inbound.uuid} port=${port}`);
       try {
         await this.remnavaveService.updateHost(hostUuid, {
           inbound: { configProfileUuid: profileUuid, configProfileInboundUuid: inbound.uuid },
           port,
-          address: nodeAddress,
-          nodes: [nodeUuid],
+          address: profile.nodeAddress,
+          nodes: [profile.nodeUuid],
         });
         updatedCount++;
       } catch (e) {
-        this.logger.error(`syncHosts: ошибка обновления хоста ${hostUuid}: ${e.message}`);
+        this.logger.error(`syncHosts: ошибка обновления хоста ${hostUuid}: ${e?.message}`);
       }
     }
 

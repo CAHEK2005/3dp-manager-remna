@@ -3,9 +3,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsController } from './settings.controller';
 import { Setting } from './entities/setting.entity';
 import { RemnavaveModule } from '../remnawave/remnawave.module';
+import { RotationModule } from '../rotation/rotation.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Setting]), RemnavaveModule],
+  imports: [TypeOrmModule.forFeature([Setting]), RemnavaveModule, RotationModule],
   controllers: [SettingsController],
 })
 export class SettingsModule {}

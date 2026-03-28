@@ -1,4 +1,7 @@
-import { Controller, Get, Post, Body, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import {
+  Controller, Get, Post, Body, Patch, Delete, Param, Query,
+  HttpException, HttpStatus, Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Setting } from './entities/setting.entity';
@@ -6,6 +9,7 @@ import * as net from 'net';
 import * as dns from 'dns/promises';
 import { COUNTRIES } from './countries';
 import { RemnavaveService } from '../remnawave/remnawave.service';
+import { RotationService, ManagedProfile } from '../rotation/rotation.service';
 
 @Controller('settings')
 export class SettingsController {
@@ -15,6 +19,7 @@ export class SettingsController {
     @InjectRepository(Setting)
     private settingsRepo: Repository<Setting>,
     private remnavaveService: RemnavaveService,
+    private rotationService: RotationService,
   ) {}
 
   @Get()
@@ -34,6 +39,208 @@ export class SettingsController {
       this.logger.error(`Ошибка загрузки профилей: ${e.message}`);
       throw new HttpException(e.message, HttpStatus.BAD_REQUEST);
     }
+  }
+
+  @Get('profiles/managed')
+  async getManagedProfiles() {
+    return this.rotationService.loadProfiles();
+  }
+
+  @Post('profiles/managed')
+  async addManagedProfile(@Body() body: { uuid?: string; name: string; createNew?: boolean }) {
+    const profiles = await this.rotationService.loadProfiles();
+
+    let profileUuid = body.uuid;
+
+    if (body.createNew) {
+      try {
+        const created = await this.remnavaveService.createConfigProfile(body.name);
+        profileUuid = created?.uuid || created?.response?.uuid || created;
+        if (!profileUuid || typeof profileUuid !== 'string') {
+          throw new HttpException('Не удалось получить UUID нового профиля', HttpStatus.BAD_REQUEST);
+        }
+      } catch (e) {
+        if (e instanceof HttpException) throw e;
+        throw new HttpException(`Ошибка создания профиля в Remnawave: ${e.message}`, HttpStatus.BAD_REQUEST);
+      }
+    }
+
+    if (!profileUuid) throw new HttpException('UUID профиля не указан', HttpStatus.BAD_REQUEST);
+    if (profiles.find(p => p.uuid === profileUuid)) {
+      throw new HttpException('Профиль уже добавлен', HttpStatus.CONFLICT);
+    }
+
+    const newProfile: ManagedProfile = {
+      uuid: profileUuid,
+      name: body.name,
+      inboundsConfig: [],
+      nodeUuid: '',
+      nodeAddress: '',
+      applyToNode: false,
+      hostMappings: [],
+      hostTemplate: '{countryCode} {nodeName} - {inboundType}',
+      rotationEnabled: true,
+      rotationMode: 'interval',
+      rotationInterval: 1440,
+      rotationScheduleTime: '03:00',
+      rotationTimezone: 'Europe/Moscow',
+      lastRotationTimestamp: 0,
+      lastRotationStatus: null,
+      lastRotationError: '',
+    };
+
+    profiles.push(newProfile);
+    await this.rotationService.saveProfiles(profiles);
+    return newProfile;
+  }
+
+  @Patch('profiles/managed/:uuid/name')
+  async renameManagedProfile(@Param('uuid') uuid: string, @Body() body: { name: string }) {
+    const profiles = await this.rotationService.loadProfiles();
+    const idx = profiles.findIndex(p => p.uuid === uuid);
+    if (idx === -1) throw new HttpException('Профиль не найден', HttpStatus.NOT_FOUND);
+
+    profiles[idx] = { ...profiles[idx], name: body.name };
+
+    try {
+      await this.remnavaveService.renameConfigProfile(uuid, body.name);
+    } catch (e) {
+      this.logger.warn(`Не удалось переименовать профиль в Remnawave: ${e.message}`);
+    }
+
+    await this.rotationService.saveProfiles(profiles);
+    return profiles[idx];
+  }
+
+  @Patch('profiles/managed/:uuid')
+  async updateManagedProfile(@Param('uuid') uuid: string, @Body() body: Partial<ManagedProfile>) {
+    const profiles = await this.rotationService.loadProfiles();
+    const idx = profiles.findIndex(p => p.uuid === uuid);
+    if (idx === -1) throw new HttpException('Профиль не найден', HttpStatus.NOT_FOUND);
+
+    profiles[idx] = { ...profiles[idx], ...body, uuid };
+    await this.rotationService.saveProfiles(profiles);
+    return profiles[idx];
+  }
+
+  @Delete('profiles/managed/:uuid')
+  async deleteManagedProfile(
+    @Param('uuid') uuid: string,
+    @Query('deleteFromRemnawave') deleteFromRemnawave?: string,
+  ) {
+    const profiles = await this.rotationService.loadProfiles();
+    const idx = profiles.findIndex(p => p.uuid === uuid);
+    if (idx === -1) throw new HttpException('Профиль не найден', HttpStatus.NOT_FOUND);
+
+    if (deleteFromRemnawave === 'true') {
+      try {
+        await this.remnavaveService.deleteConfigProfile(uuid);
+      } catch (e) {
+        this.logger.warn(`Не удалось удалить профиль из Remnawave: ${e.message}`);
+      }
+    }
+
+    profiles.splice(idx, 1);
+    await this.rotationService.saveProfiles(profiles);
+    return { success: true };
+  }
+
+  @Post('profiles/managed/:uuid/rotate')
+  async rotateProfile(@Param('uuid') uuid: string) {
+    const profiles = await this.rotationService.loadProfiles();
+    const idx = profiles.findIndex(p => p.uuid === uuid);
+    if (idx === -1) throw new HttpException('Профиль не найден', HttpStatus.NOT_FOUND);
+
+    const result = await this.rotationService.performRotation(profiles[idx]);
+
+    profiles[idx] = {
+      ...profiles[idx],
+      lastRotationTimestamp: result.success ? Date.now() : profiles[idx].lastRotationTimestamp,
+      lastRotationStatus: result.success ? 'success' : 'error',
+      lastRotationError: result.success ? '' : result.message,
+    };
+    await this.rotationService.saveProfiles(profiles);
+    return result;
+  }
+
+  @Post('profiles/managed/:uuid/hosts/create')
+  async createHostsForProfile(@Param('uuid') uuid: string) {
+    const profiles = await this.rotationService.loadProfiles();
+    const idx = profiles.findIndex(p => p.uuid === uuid);
+    if (idx === -1) throw new HttpException('Профиль не найден', HttpStatus.NOT_FOUND);
+
+    const profile = profiles[idx];
+
+    let rwProfile: any;
+    try {
+      rwProfile = await this.remnavaveService.getConfigProfile(uuid);
+    } catch (e) {
+      throw new HttpException('Ошибка получения профиля из Remnawave', HttpStatus.BAD_REQUEST);
+    }
+
+    const inbounds: any[] = rwProfile?.config?.inbounds || [];
+    if (inbounds.length === 0) {
+      throw new HttpException('Сначала запустите ротацию для генерации инбаундов', HttpStatus.BAD_REQUEST);
+    }
+
+    let nodeName = '';
+    let countryCode = '';
+    let nodeAddress = profile.nodeAddress || '';
+
+    if (profile.nodeUuid) {
+      try {
+        const nodes = await this.remnavaveService.getNodes();
+        const node = nodes.find((n: any) => n.uuid === profile.nodeUuid);
+        if (node) {
+          nodeName = node.name || '';
+          countryCode = node.countryCode || '';
+          nodeAddress = node.address || nodeAddress;
+        }
+      } catch (e) {
+        this.logger.warn(`Не удалось получить ноды: ${e.message}`);
+      }
+    }
+
+    const newMappings: { inboundType: string; hostUuid: string }[] = [];
+    let created = 0;
+
+    for (let i = 0; i < inbounds.length; i++) {
+      const inbound = inbounds[i];
+      const tag: string = inbound.tag || '';
+      const inboundType = tag.replace(/-rw-manager$/, '');
+
+      let remark = (profile.hostTemplate || '{countryCode} {nodeName} - {inboundType}')
+        .replace('{countryCode}', countryCode)
+        .replace('{nodeName}', nodeName)
+        .replace('{nodeAddress}', nodeAddress)
+        .replace('{inboundType}', inboundType)
+        .replace('{index}', String(i + 1));
+
+      remark = remark.slice(0, 40);
+
+      try {
+        const newHost = await this.remnavaveService.createHost({
+          inbound: { configProfileUuid: uuid, configProfileInboundUuid: inbound.uuid },
+          remark,
+          address: nodeAddress,
+          port: inbound.port ?? inbound.rawInbound?.port ?? 0,
+          nodes: profile.nodeUuid ? [profile.nodeUuid] : undefined,
+        });
+
+        const hostUuid = newHost?.uuid || newHost?.response?.uuid || (typeof newHost === 'string' ? newHost : null);
+        if (hostUuid) {
+          newMappings.push({ inboundType, hostUuid });
+          created++;
+        }
+      } catch (e) {
+        this.logger.error(`Ошибка создания хоста для инбаунда ${tag}: ${e.message}`);
+      }
+    }
+
+    profiles[idx] = { ...profile, hostMappings: newMappings };
+    await this.rotationService.saveProfiles(profiles);
+
+    return { created, mappings: newMappings };
   }
 
   @Get('nodes')
