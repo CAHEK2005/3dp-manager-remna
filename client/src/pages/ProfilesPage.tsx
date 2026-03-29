@@ -19,6 +19,7 @@ interface InboundConfigItem {
   type: string;
   port: string;
   sni?: string;
+  security?: string;
   tag?: string;
 }
 
@@ -374,6 +375,7 @@ export default function ProfilesPage() {
         type: newType,
         port: item.port,
         ...(hasSni ? { sni: item.sni || 'random' } : {}),
+        ...(newType === 'vless-ws' && item.security ? { security: item.security } : {}),
         ...(item.tag ? { tag: item.tag } : {}),
       } : item
     ));
@@ -740,6 +742,20 @@ export default function ProfilesPage() {
                                 helperText="random или домен"
                                 sx={{ width: 200 }}
                               />
+                            )}
+
+                            {item.type === 'vless-ws' && (
+                              <FormControl size="small" sx={{ width: 110 }}>
+                                <InputLabel>Security</InputLabel>
+                                <Select
+                                  value={item.security || 'none'}
+                                  label="Security"
+                                  onChange={(e: SelectChangeEvent) => updateInbound(idx, 'security', e.target.value)}
+                                >
+                                  <MenuItem value="none">none</MenuItem>
+                                  <MenuItem value="tls">tls</MenuItem>
+                                </Select>
+                              </FormControl>
                             )}
 
                             <TextField

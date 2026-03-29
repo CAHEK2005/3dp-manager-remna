@@ -255,7 +255,7 @@ export class RotationService implements OnModuleInit {
             inbound = this.inboundBuilder.buildVlessRealityGrpc({ port, uuid, sni, ...keys });
             break;
           case 'vless-ws':
-            inbound = this.inboundBuilder.buildVlessWs({ port, uuid, sni });
+            inbound = this.inboundBuilder.buildVlessWs({ port, uuid, sni, security: config.security });
             break;
           case 'shadowsocks-tcp':
             inbound = this.inboundBuilder.buildShadowsocksTcp({ port, uuid });

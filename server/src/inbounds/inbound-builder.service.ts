@@ -109,8 +109,24 @@ export class InboundBuilderService {
     };
   }
 
-  buildVlessWs(params: { port: number; uuid: string; sni: string }) {
-    const { port, uuid, sni } = params;
+  buildVlessWs(params: { port: number; uuid: string; sni: string; security?: string }) {
+    const { port, uuid, sni, security = 'none' } = params;
+    const streamSettings: any = {
+      network: 'ws',
+      security,
+      wsSettings: {
+        host: sni,
+        path: '/',
+        acceptProxyProtocol: false,
+      },
+    };
+    if (security === 'tls') {
+      streamSettings.tlsSettings = {
+        serverName: sni,
+        alpn: ['h2', 'http/1.1'],
+        certificates: [],
+      };
+    }
     return {
       tag: `vless-ws-rwm`,
       port,
@@ -120,15 +136,7 @@ export class InboundBuilderService {
         decryption: 'none',
         fallbacks: [],
       },
-      streamSettings: {
-        network: 'ws',
-        security: 'none',
-        wsSettings: {
-          host: sni,
-          path: '/',
-          acceptProxyProtocol: false,
-        },
-      },
+      streamSettings,
       sniffing: { enabled: false, destOverride: ['http', 'tls', 'quic', 'fakedns'] },
     };
   }
