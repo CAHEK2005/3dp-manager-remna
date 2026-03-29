@@ -268,7 +268,16 @@ export class RotationService implements OnModuleInit {
             continue;
         }
 
-        if (inbound) generatedInbounds.push(inbound);
+        if (inbound) {
+          const baseTag: string = inbound.tag;
+          const sameTagCount = generatedInbounds.filter(
+            (i: any) => i.tag === baseTag || i.tag?.startsWith(`${baseTag}-`),
+          ).length;
+          if (sameTagCount > 0) {
+            inbound.tag = `${baseTag}-${sameTagCount + 1}`;
+          }
+          generatedInbounds.push(inbound);
+        }
       }
 
       let currentProfile: any;
