@@ -122,9 +122,15 @@ export class InboundBuilderService {
     };
     if (security === 'tls') {
       streamSettings.tlsSettings = {
-        serverName: sni,
         alpn: ['h2', 'http/1.1'],
-        certificates: [],
+        serverName: sni,
+        certificates: [
+          {
+            keyFile: '/var/lib/remnawave/configs/xray/ssl/cert.key',
+            certificateFile: '/var/lib/remnawave/configs/xray/ssl/cert.pem',
+          },
+        ],
+        rejectUnknownSni: false,
       };
     }
     return {
