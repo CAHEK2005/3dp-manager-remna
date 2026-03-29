@@ -202,13 +202,13 @@ export class SettingsController {
       }
     }
 
-    const newMappings: { inboundType: string; hostUuid: string }[] = [];
+    const newMappings: { tag: string; hostUuid: string }[] = [];
     let created = 0;
 
     for (let i = 0; i < inbounds.length; i++) {
       const inbound = inbounds[i];
-      const tag: string = inbound.tag || '';
-      const inboundType = tag.replace(/-rwm$/, '');
+      const inboundTag: string = inbound.tag || '';
+      const inboundType = inboundTag.replace(/-rwm(-\d+)?$/, '');
 
       let remark = (profile.hostTemplate || '{countryCode} {nodeName} - {inboundType}')
         .replace('{countryCode}', countryCode)
@@ -230,11 +230,11 @@ export class SettingsController {
 
         const hostUuid = newHost?.uuid || newHost?.response?.uuid || (typeof newHost === 'string' ? newHost : null);
         if (hostUuid) {
-          newMappings.push({ inboundType, hostUuid });
+          newMappings.push({ tag: inboundTag, hostUuid });
           created++;
         }
       } catch (e) {
-        this.logger.error(`Ошибка создания хоста для инбаунда ${tag}: ${e.message}`);
+        this.logger.error(`Ошибка создания хоста для инбаунда ${inboundTag}: ${e.message}`);
       }
     }
 

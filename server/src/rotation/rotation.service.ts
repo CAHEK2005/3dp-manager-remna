@@ -17,7 +17,7 @@ export interface ManagedProfile {
   nodeUuid: string;
   nodeAddress: string;
   applyToNode: boolean;
-  hostMappings: { inboundType: string; hostUuid: string }[];
+  hostMappings: { tag: string; hostUuid: string }[];
   hostTemplate: string;
   rotationEnabled: boolean;
   rotationMode: 'interval' | 'schedule';
@@ -67,14 +67,14 @@ export class RotationService implements OnModuleInit {
           inboundsConfig = JSON.parse((await getKey('inbounds_config')) || '[]');
         } catch { /* ignore */ }
 
-        let hostMappings: { inboundType: string; hostUuid: string }[] = [];
+        let hostMappings: { tag: string; hostUuid: string }[] = [];
         try {
           const oldMappings = JSON.parse((await getKey('host_mappings')) || '[]');
           if (oldMappings.length > 0 && inboundsConfig.length > 0) {
             hostMappings = oldMappings
               .filter((m: any) => m.inboundIndex !== undefined && inboundsConfig[m.inboundIndex])
               .map((m: any) => ({
-                inboundType: inboundsConfig[m.inboundIndex].type,
+                tag: `${inboundsConfig[m.inboundIndex].type}-rwm`,
                 hostUuid: m.hostUuid,
               }));
           }
@@ -269,6 +269,9 @@ export class RotationService implements OnModuleInit {
         }
 
         if (inbound) {
+          if (config.tag) {
+            inbound.tag = config.tag;
+          }
           const baseTag: string = inbound.tag;
           const sameTagCount = generatedInbounds.filter(
             (i: any) => i.tag === baseTag || i.tag?.startsWith(`${baseTag}-`),
@@ -338,10 +341,17 @@ export class RotationService implements OnModuleInit {
     }
 
     let updatedCount = 0;
-    for (const { inboundType, hostUuid } of profile.hostMappings) {
-      const inbound = updatedInbounds.find((i: any) => i.tag?.startsWith(inboundType));
+    for (const mapping of profile.hostMappings) {
+      const { hostUuid } = mapping;
+      const tag = (mapping as any).tag as string | undefined;
+      const legacyType = (mapping as any).inboundType as string | undefined;
+
+      const inbound = tag
+        ? updatedInbounds.find((i: any) => i.tag === tag)
+        : updatedInbounds.find((i: any) => i.tag?.startsWith(legacyType));
+
       if (!inbound) {
-        this.logger.warn(`syncHosts: инбаунд типа ${inboundType} не найден — пропускаем`);
+        this.logger.warn(`syncHosts: инбаунд ${tag || legacyType} не найден — пропускаем`);
         continue;
       }
 

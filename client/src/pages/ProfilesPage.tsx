@@ -19,10 +19,11 @@ interface InboundConfigItem {
   type: string;
   port: string;
   sni?: string;
+  tag?: string;
 }
 
 interface HostMapping {
-  inboundType: string;
+  tag: string;
   hostUuid: string;
 }
 
@@ -131,6 +132,20 @@ function validateProfileName(name: string): string {
   if (name.length > 30) return 'Максимум 30 символов';
   if (!PROFILE_NAME_RE.test(name)) return 'Только латинские буквы, цифры, пробел, _ и -';
   return '';
+}
+
+function computeEffectiveTags(items: InboundConfigItem[]): string[] {
+  const result: string[] = [];
+  for (const item of items) {
+    if (item.type === 'custom') {
+      result.push(item.tag || '');
+      continue;
+    }
+    const baseTag = item.tag || `${item.type}-rwm`;
+    const sameCount = result.filter(t => t === baseTag || t.startsWith(`${baseTag}-`)).length;
+    result.push(sameCount > 0 ? `${baseTag}-${sameCount + 1}` : baseTag);
+  }
+  return result;
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -355,7 +370,12 @@ export default function ProfilesPage() {
   const handleInboundTypeChange = (idx: number, newType: string) => {
     const hasSni = SNI_TYPES.has(newType);
     setLocalInbounds(prev => prev.map((item, i) =>
-      i === idx ? { type: newType, port: item.port, ...(hasSni ? { sni: item.sni || 'random' } : {}) } : item
+      i === idx ? {
+        type: newType,
+        port: item.port,
+        ...(hasSni ? { sni: item.sni || 'random' } : {}),
+        ...(item.tag ? { tag: item.tag } : {}),
+      } : item
     ));
   };
 
@@ -444,11 +464,11 @@ export default function ProfilesPage() {
     }
   };
 
-  const updateHostMapping = (inboundType: string, hostUuid: string) => {
+  const updateHostMapping = (tag: string, hostUuid: string) => {
     setLocalHostMappings(prev => {
-      const existing = prev.find(m => m.inboundType === inboundType);
-      if (existing) return prev.map(m => m.inboundType === inboundType ? { ...m, hostUuid } : m);
-      return [...prev, { inboundType, hostUuid }];
+      const existing = prev.find(m => m.tag === tag);
+      if (existing) return prev.map(m => m.tag === tag ? { ...m, hostUuid } : m);
+      return [...prev, { tag, hostUuid }];
     });
   };
 
@@ -689,44 +709,54 @@ export default function ProfilesPage() {
                     )}
 
                     <Stack spacing={2}>
-                      {localInbounds.map((item, idx) => (
-                        <Box key={idx} sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                          <FormControl size="small" sx={{ minWidth: 200 }}>
-                            <InputLabel>Тип</InputLabel>
-                            <Select
-                              value={item.type}
-                              label="Тип"
-                              onChange={(e: SelectChangeEvent) => handleInboundTypeChange(idx, e.target.value)}
-                            >
-                              {CONNECTION_TYPES.map(t => (
-                                <MenuItem key={t} value={t}>{t}</MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
+                      {(() => {
+                        const effectiveTags = computeEffectiveTags(localInbounds);
+                        return localInbounds.map((item, idx) => (
+                          <Box key={idx} sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                            <FormControl size="small" sx={{ minWidth: 200 }}>
+                              <InputLabel>Тип</InputLabel>
+                              <Select
+                                value={item.type}
+                                label="Тип"
+                                onChange={(e: SelectChangeEvent) => handleInboundTypeChange(idx, e.target.value)}
+                              >
+                                {CONNECTION_TYPES.map(t => (
+                                  <MenuItem key={t} value={t}>{t}</MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
 
-                          <TextField
-                            size="small" label="Порт" value={item.port}
-                            onChange={e => updateInbound(idx, 'port', e.target.value)}
-                            helperText="random или число"
-                            sx={{ width: 130 }}
-                          />
-
-                          {SNI_TYPES.has(item.type) && (
                             <TextField
-                              size="small" label="SNI" value={item.sni || ''}
-                              onChange={e => updateInbound(idx, 'sni', e.target.value)}
-                              helperText="random или домен"
-                              sx={{ width: 200 }}
+                              size="small" label="Порт" value={item.port}
+                              onChange={e => updateInbound(idx, 'port', e.target.value)}
+                              helperText="random или число"
+                              sx={{ width: 130 }}
                             />
-                          )}
 
-                          <Tooltip title="Удалить">
-                            <IconButton color="error" onClick={() => removeInbound(idx)} sx={{ mt: 0.5 }}>
-                              <Delete />
-                            </IconButton>
-                          </Tooltip>
-                        </Box>
-                      ))}
+                            {SNI_TYPES.has(item.type) && (
+                              <TextField
+                                size="small" label="SNI" value={item.sni || ''}
+                                onChange={e => updateInbound(idx, 'sni', e.target.value)}
+                                helperText="random или домен"
+                                sx={{ width: 200 }}
+                              />
+                            )}
+
+                            <TextField
+                              size="small" label="Тег (опционально)" value={item.tag || ''}
+                              onChange={e => updateInbound(idx, 'tag', e.target.value)}
+                              helperText={`→ ${effectiveTags[idx]}`}
+                              sx={{ width: 220 }}
+                            />
+
+                            <Tooltip title="Удалить">
+                              <IconButton color="error" onClick={() => removeInbound(idx)} sx={{ mt: 0.5 }}>
+                                <Delete />
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                        ));
+                      })()}
                     </Stack>
 
                     <Divider sx={{ mt: 3, mb: 2 }} />
@@ -846,7 +876,7 @@ export default function ProfilesPage() {
 
                     <Paper variant="outlined" sx={{ p: 2 }}>
                       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                        <Typography variant="subtitle1">Маппинг хостов (по типу инбаунда)</Typography>
+                        <Typography variant="subtitle1">Маппинг хостов (по тегу инбаунда)</Typography>
                         <Button size="small" onClick={loadHosts} startIcon={<Refresh />}>Обновить</Button>
                       </Stack>
 
@@ -857,29 +887,33 @@ export default function ProfilesPage() {
                       )}
 
                       <Stack spacing={2}>
-                        {localInbounds.map((item, idx) => {
-                          const mapping = localHostMappings.find(m => m.inboundType === item.type);
-                          return (
-                            <Box key={idx} sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-                              <Typography variant="body2" sx={{ minWidth: 180 }}>{item.type}</Typography>
-                              <FormControl size="small" sx={{ minWidth: 280 }}>
-                                <InputLabel>Хост Remnawave</InputLabel>
-                                <Select
-                                  value={mapping?.hostUuid || ''}
-                                  label="Хост Remnawave"
-                                  onChange={(e: SelectChangeEvent) => updateHostMapping(item.type, e.target.value)}
-                                >
-                                  <MenuItem value=""><em>Не выбрано</em></MenuItem>
-                                  {hosts.map(h => (
-                                    <MenuItem key={h.uuid} value={h.uuid}>
-                                      {h.remark} ({h.address}:{h.port})
-                                    </MenuItem>
-                                  ))}
-                                </Select>
-                              </FormControl>
-                            </Box>
-                          );
-                        })}
+                        {(() => {
+                          const effectiveTags = computeEffectiveTags(localInbounds);
+                          return localInbounds.map((item, idx) => {
+                            const effectiveTag = effectiveTags[idx];
+                            const mapping = localHostMappings.find(m => m.tag === effectiveTag);
+                            return (
+                              <Box key={idx} sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <Typography variant="body2" sx={{ minWidth: 180 }}>{effectiveTag}</Typography>
+                                <FormControl size="small" sx={{ minWidth: 280 }}>
+                                  <InputLabel>Хост Remnawave</InputLabel>
+                                  <Select
+                                    value={mapping?.hostUuid || ''}
+                                    label="Хост Remnawave"
+                                    onChange={(e: SelectChangeEvent) => updateHostMapping(effectiveTag, e.target.value)}
+                                  >
+                                    <MenuItem value=""><em>Не выбрано</em></MenuItem>
+                                    {hosts.map(h => (
+                                      <MenuItem key={h.uuid} value={h.uuid}>
+                                        {h.remark} ({h.address}:{h.port})
+                                      </MenuItem>
+                                    ))}
+                                  </Select>
+                                </FormControl>
+                              </Box>
+                            );
+                          });
+                        })()}
                       </Stack>
 
                       {localInbounds.length > 0 && (
