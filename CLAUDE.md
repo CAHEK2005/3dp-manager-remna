@@ -140,10 +140,20 @@ interface ManagedProfile {
 
 ### Переменные окружения (`server/.env`)
 
+Пример в `server/.env.example`. Обязательные переменные:
+
 ```
 DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_NAME
 ADMIN_LOGIN, ADMIN_PASSWORD
 JWT_SECRET
+COUNTRY_FLAG   # Emoji-флаг по умолчанию для share-ссылок (например, 🇷🇺), иначе 💯
 ```
 
-Настройки подключения к Remnawave хранятся в БД (таблица `settings`), не в `.env`.
+Настройки подключения к Remnawave хранятся в БД (таблица `settings`), не в `.env`. Учётные данные администратора сидируются из ENV в таблицу `settings` при старте — после этого `.env` значения `ADMIN_LOGIN`/`ADMIN_PASSWORD` не используются напрямую. Смена пароля через UI обновляет только запись в БД.
+
+### Ключевые детали реализации
+
+- **Слияние конфигов:** `performRotation` обновляет только поле `inbounds` в профиле Remnawave, сохраняя `outbounds`, `routing` и прочие секции без изменений.
+- **Дедупликация тегов:** если два инбаунда одного типа — второй получает суффикс `-2`, `-3` и т.д.
+- **Миграция:** `RotationService` автоматически мигрирует устаревший формат `remnawave_profile_uuid` в `managed_profiles` при старте.
+- **GeoIP:** страна/флаг для Remnawave URL резолвится только в момент сохранения URL в настройках (через `ip-api.com`).

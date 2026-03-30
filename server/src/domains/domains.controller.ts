@@ -15,6 +15,11 @@ export class DomainsController {
     return this.domainsService.createMany(body.domains);
   }
 
+  @Post('preview-url')
+  previewUrl(@Body() body: { url: string }) {
+    return this.domainsService.previewUrl(body.url);
+  }
+
   @Get('all')
   findAllWithoutPagination() {
     return this.domainsService.findAllUnpaginated(); 

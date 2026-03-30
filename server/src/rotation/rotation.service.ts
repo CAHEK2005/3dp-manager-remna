@@ -27,6 +27,7 @@ export interface ManagedProfile {
   lastRotationTimestamp: number;
   lastRotationStatus: 'success' | 'error' | null;
   lastRotationError: string;
+  profileDomains?: string[];
 }
 
 @Injectable()
@@ -223,7 +224,12 @@ export class RotationService implements OnModuleInit {
         return { success: false, message: 'Ошибка получения X25519 ключей' };
       }
 
-      const domains = await this.domainRepo.find({ where: { isEnabled: true } });
+      let domains: { name: string }[];
+      if (profile.profileDomains && profile.profileDomains.length > 0) {
+        domains = profile.profileDomains.map(name => ({ name }));
+      } else {
+        domains = await this.domainRepo.find({ where: { isEnabled: true } });
+      }
       const generatedInbounds: any[] = [];
       const usedPorts = new Set<number>();
       const excludedPorts = new Set<number>(profile.excludedPorts || []);
@@ -372,7 +378,7 @@ export class RotationService implements OnModuleInit {
     this.logger.log(`syncHosts: обновлено ${updatedCount} хостов`);
   }
 
-  private pickDomain(list: Domain[]): string {
+  private pickDomain(list: { name: string }[]): string {
     if (list.length === 0) return '';
     return list[Math.floor(Math.random() * list.length)].name;
   }

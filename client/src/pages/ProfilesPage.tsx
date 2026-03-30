@@ -1,17 +1,18 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Box, Typography, Paper, Button, Stack, Chip, Tooltip, IconButton,
   TextField, Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel,
   Dialog, DialogTitle, DialogContent, DialogActions, Checkbox,
   Tabs, Tab, Snackbar, Alert, useTheme, useMediaQuery, Grid, Divider,
-  CircularProgress, FormHelperText,
+  CircularProgress, FormHelperText, List, ListItem, ListItemText,
 } from '@mui/material';
 import {
   Add, Delete, PlayArrow, PauseCircleFilled, Warning, Check, Refresh,
-  CheckCircle,
+  CheckCircle, UploadFile, Language,
 } from '@mui/icons-material';
 import type { SelectChangeEvent } from '@mui/material/Select';
 import api from '../api';
+import UrlImportDialog from '../components/UrlImportDialog';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -46,6 +47,7 @@ interface ManagedProfile {
   lastRotationTimestamp: number;
   lastRotationStatus: 'success' | 'error' | null;
   lastRotationError: string;
+  profileDomains?: string[];
 }
 
 interface RwProfile { uuid: string; name: string; }
@@ -194,6 +196,12 @@ export default function ProfilesPage() {
   const [localScheduleTime, setLocalScheduleTime] = useState('03:00');
   const [localTimezone, setLocalTimezone] = useState('Europe/Moscow');
 
+  // ── Tab 4: SNI Domains ────────────────────────────────────────────────────
+  const [localProfileDomains, setLocalProfileDomains] = useState<string[]>([]);
+  const [domainInput, setDomainInput] = useState('');
+  const [profileUrlImportOpen, setProfileUrlImportOpen] = useState(false);
+  const domainFileInputRef = useRef<HTMLInputElement>(null);
+
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState({ open: false, type: 'success' as 'success' | 'error', text: '' });
 
@@ -258,6 +266,8 @@ export default function ProfilesPage() {
     setLocalInterval(selectedProfile.rotationInterval || 1440);
     setLocalScheduleTime(selectedProfile.rotationScheduleTime || '03:00');
     setLocalTimezone(selectedProfile.rotationTimezone || 'Europe/Moscow');
+    setLocalProfileDomains(selectedProfile.profileDomains || []);
+    setDomainInput('');
   }, [selectedProfile?.uuid]);
 
   // ── Profile state helpers ─────────────────────────────────────────────────
@@ -536,6 +546,63 @@ export default function ProfilesPage() {
     }
   };
 
+  // ── Tab 4: SNI Domains ────────────────────────────────────────────────────
+
+  const handleAddDomain = () => {
+    const trimmed = domainInput.trim();
+    if (!trimmed || localProfileDomains.includes(trimmed)) return;
+    setLocalProfileDomains(prev => [...prev, trimmed]);
+    setDomainInput('');
+  };
+
+  const handleRemoveDomain = (domain: string) => {
+    setLocalProfileDomains(prev => prev.filter(d => d !== domain));
+  };
+
+  const handleClearAllDomains = () => {
+    setLocalProfileDomains([]);
+  };
+
+  const handleDomainFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) return;
+      const lines = text
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(l => l.length > 0 && !l.startsWith('#'));
+      setLocalProfileDomains(prev => {
+        const existing = new Set(prev);
+        return [...prev, ...lines.filter(l => !existing.has(l))];
+      });
+      if (domainFileInputRef.current) domainFileInputRef.current.value = '';
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSaveProfileDomains = async () => {
+    if (!selectedProfile) return;
+    try {
+      await api.patch(`/settings/profiles/managed/${selectedProfile.uuid}`, {
+        profileDomains: localProfileDomains,
+      });
+      updateProfileInState(selectedProfile.uuid, { profileDomains: localProfileDomains });
+      showMsg('success', 'Домены SNI сохранены');
+    } catch (e: any) {
+      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    }
+  };
+
+  const handleUrlAddToProfile = (domains: string[]) => {
+    setLocalProfileDomains(prev => {
+      const existing = new Set(prev);
+      return [...prev, ...domains.filter(d => !existing.has(d))];
+    });
+  };
+
   // ─── Render ────────────────────────────────────────────────────────────────
 
   const alreadyAddedUuids = new Set(profiles.map(p => p.uuid));
@@ -688,6 +755,7 @@ export default function ProfilesPage() {
                   <Tab label="Нода" />
                   <Tab label="Хосты" />
                   <Tab label="Расписание" />
+                  <Tab label="Домены SNI" />
                 </Tabs>
               </Box>
 
@@ -1054,6 +1122,108 @@ export default function ProfilesPage() {
                         Запустить сейчас
                       </Button>
                     </Stack>
+                  </Box>
+                )}
+
+                {/* ── Tab 4: SNI Domains ── */}
+                {profileTab === 4 && (
+                  <Box>
+                    <Typography variant="h6" gutterBottom>Домены SNI профиля</Typography>
+                    <Divider sx={{ mb: 2 }} />
+
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                      Если указаны домены профиля, они используются вместо глобального списка при sni: random
+                    </Alert>
+
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+                      <TextField
+                        size="small"
+                        label="Домен"
+                        value={domainInput}
+                        onChange={e => setDomainInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleAddDomain()}
+                        sx={{ flex: 1 }}
+                      />
+                      <Button variant="contained" onClick={handleAddDomain} startIcon={<Add />}>
+                        Добавить
+                      </Button>
+                    </Stack>
+
+                    <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2 }}>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<UploadFile />}
+                        onClick={() => domainFileInputRef.current?.click()}
+                      >
+                        Из файла
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<Language />}
+                        onClick={() => setProfileUrlImportOpen(true)}
+                      >
+                        Из URL
+                      </Button>
+                      {localProfileDomains.length > 0 && (
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          color="error"
+                          startIcon={<Delete />}
+                          onClick={handleClearAllDomains}
+                        >
+                          Очистить всё
+                        </Button>
+                      )}
+                    </Stack>
+
+                    <input
+                      type="file"
+                      accept=".txt"
+                      ref={domainFileInputRef}
+                      style={{ display: 'none' }}
+                      onChange={handleDomainFileUpload}
+                    />
+
+                    <Paper variant="outlined" sx={{ maxHeight: 360, overflowY: 'auto', mb: 2 }}>
+                      <List dense>
+                        {localProfileDomains.length === 0 && (
+                          <Typography sx={{ p: 2 }} color="textSecondary" textAlign="center">
+                            Нет доменов. Используется глобальный список.
+                          </Typography>
+                        )}
+                        {localProfileDomains.map(d => (
+                          <ListItem
+                            key={d}
+                            secondaryAction={
+                              <IconButton edge="end" size="small" onClick={() => handleRemoveDomain(d)}>
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            }
+                          >
+                            <ListItemText primary={d} />
+                          </ListItem>
+                        ))}
+                      </List>
+                    </Paper>
+
+                    {localProfileDomains.length > 0 && (
+                      <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
+                        {localProfileDomains.length} доменов
+                      </Typography>
+                    )}
+
+                    <Button variant="contained" onClick={handleSaveProfileDomains}>
+                      Сохранить домены
+                    </Button>
+
+                    <UrlImportDialog
+                      open={profileUrlImportOpen}
+                      onClose={() => setProfileUrlImportOpen(false)}
+                      onAdd={handleUrlAddToProfile}
+                    />
                   </Box>
                 )}
 

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, TextField, Button, Typography, List, ListItem, ListItemText, IconButton, Paper, TablePagination, useTheme, useMediaQuery } from '@mui/material';
-import { Delete, Add, UploadFile, Remove } from '@mui/icons-material';
+import { Delete, Add, UploadFile, Remove, Language } from '@mui/icons-material';
 import api from '../api';
+import UrlImportDialog from '../components/UrlImportDialog';
 
 interface Domain { id: number; name: string; }
 
@@ -10,6 +11,7 @@ export default function DomainsPage() {
   const [newDomain, setNewDomain] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [totalCount, setTotalCount] = useState(0);
+  const [urlImportOpen, setUrlImportOpen] = useState(false);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -61,6 +63,16 @@ export default function DomainsPage() {
     }
   };
 
+  const handleUrlImport = async (importedDomains: string[]) => {
+    try {
+      const { data } = await api.post('/domains/upload', { domains: importedDomains });
+      alert(`Успешно добавлено доменов: ${data.count}`);
+      loadDomains();
+    } catch (_err) {
+      alert('Ошибка при загрузке списка');
+    }
+  };
+
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -97,6 +109,7 @@ export default function DomainsPage() {
         {isMobile ? (
           <>
             <IconButton edge="end" onClick={() => fileInputRef.current?.click()}><UploadFile /></IconButton>
+            <IconButton edge="end" onClick={() => setUrlImportOpen(true)}><Language /></IconButton>
             <IconButton edge="end" onClick={handleAdd}><Add /></IconButton>
           </>
         ) : (
@@ -104,10 +117,18 @@ export default function DomainsPage() {
             <Button
               variant="outlined"
               startIcon={<UploadFile />}
-              sx={{ width: isMobile ? 'auto' : '170px' }}
+              sx={{ whiteSpace: 'nowrap' }}
               onClick={() => fileInputRef.current?.click()}
             >
-              {isMobile ? '' : 'Из файла'}
+              Из файла
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<Language />}
+              sx={{ whiteSpace: 'nowrap' }}
+              onClick={() => setUrlImportOpen(true)}
+            >
+              Из URL
             </Button>
             <Button variant="contained" sx={{ width: '160px' }} startIcon={<Add />} onClick={handleAdd}>Добавить</Button>
           </>
@@ -134,6 +155,12 @@ export default function DomainsPage() {
           </Button>
         </Box>
       )}
+
+      <UrlImportDialog
+        open={urlImportOpen}
+        onClose={() => setUrlImportOpen(false)}
+        onAdd={handleUrlImport}
+      />
 
       <Paper sx={{ mt: domains.length > 0 ? 0 : 3 }}>
         <List>
