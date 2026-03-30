@@ -8,7 +8,7 @@ import {
 } from '@mui/material';
 import {
   Add, Delete, PlayArrow, PauseCircleFilled, Warning, Check, Refresh,
-  CheckCircle, UploadFile, Language,
+  CheckCircle, UploadFile, Language, FileDownload,
 } from '@mui/icons-material';
 import type { SelectChangeEvent } from '@mui/material/Select';
 import api from '../api';
@@ -596,6 +596,17 @@ export default function ProfilesPage() {
     }
   };
 
+  const handleExportProfileDomains = () => {
+    const text = localProfileDomains.join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${selectedProfile?.name || 'profile'}-domains.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleUrlAddToProfile = (domains: string[]) => {
     setLocalProfileDomains(prev => {
       const existing = new Set(prev);
@@ -1166,6 +1177,16 @@ export default function ProfilesPage() {
                       >
                         Из URL
                       </Button>
+                      {localProfileDomains.length > 0 && (
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<FileDownload />}
+                          onClick={handleExportProfileDomains}
+                        >
+                          Экспорт .txt
+                        </Button>
+                      )}
                       {localProfileDomains.length > 0 && (
                         <Button
                           variant="outlined"

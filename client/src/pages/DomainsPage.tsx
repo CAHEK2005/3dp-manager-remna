@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, TextField, Button, Typography, List, ListItem, ListItemText, IconButton, Paper, TablePagination, useTheme, useMediaQuery } from '@mui/material';
-import { Delete, Add, UploadFile, Remove, Language } from '@mui/icons-material';
+import { Delete, Add, UploadFile, Remove, Language, FileDownload } from '@mui/icons-material';
 import api from '../api';
 import UrlImportDialog from '../components/UrlImportDialog';
 
@@ -60,6 +60,22 @@ export default function DomainsPage() {
         await api.delete('/domains/all');
         loadDomains();
       } catch (_e) { alert('Ошибка удаления'); }
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      const { data } = await api.get('/domains/all');
+      const text = (data as { name: string }[]).map(d => d.name).join('\n');
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'domains.txt';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (_e) {
+      alert('Ошибка экспорта');
     }
   };
 
@@ -142,8 +158,16 @@ export default function DomainsPage() {
         />
       </Paper>
 
-      {domains.length > 0 && (
-        <Box sx={{ display: 'flex', justifyContent: 'end', width: '100%' }}>
+      {totalCount > 0 && (
+        <Box sx={{ display: 'flex', justifyContent: 'end', gap: 1, width: '100%' }}>
+          <Button
+            variant="text"
+            size="small"
+            startIcon={<FileDownload />}
+            onClick={handleExport}
+          >
+            Экспорт .txt
+          </Button>
           <Button
             variant="text"
             color="error"
