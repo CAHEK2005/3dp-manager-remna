@@ -48,6 +48,7 @@ interface ManagedProfile {
   lastRotationStatus: 'success' | 'error' | null;
   lastRotationError: string;
   profileDomains?: string[];
+  hostIndexStart?: number;
 }
 
 interface RwProfile { uuid: string; name: string; }
@@ -187,6 +188,7 @@ export default function ProfilesPage() {
   const [localNodeUuid, setLocalNodeUuid] = useState('');
   const [localApplyToNode, setLocalApplyToNode] = useState(false);
   const [localTemplate, setLocalTemplate] = useState('{countryCode} {nodeName} - {inboundType}');
+  const [localHostIndexStart, setLocalHostIndexStart] = useState(1);
   const [localHostMappings, setLocalHostMappings] = useState<HostMapping[]>([]);
   const [localExcludedPorts, setLocalExcludedPorts] = useState<number[]>([]);
   const [excludedPortInput, setExcludedPortInput] = useState('');
@@ -260,6 +262,7 @@ export default function ProfilesPage() {
     setLocalNodeUuid(selectedProfile.nodeUuid || '');
     setLocalApplyToNode(selectedProfile.applyToNode ?? false);
     setLocalTemplate(selectedProfile.hostTemplate || '{countryCode} {nodeName} - {inboundType}');
+    setLocalHostIndexStart(selectedProfile.hostIndexStart ?? 1);
     setLocalHostMappings(selectedProfile.hostMappings || []);
     setLocalRotationEnabled(selectedProfile.rotationEnabled !== false);
     setLocalRotationMode(selectedProfile.rotationMode || 'interval');
@@ -463,7 +466,7 @@ export default function ProfilesPage() {
         .replace('{nodeName}', nodeName)
         .replace('{nodeAddress}', nodeAddress)
         .replace('{inboundType}', inboundType)
-        .replace('{index}', String(i + 1));
+        .replace('{index}', String(localHostIndexStart + i));
       if (remark.length > 40) return true;
     }
     return false;
@@ -472,8 +475,8 @@ export default function ProfilesPage() {
   const handleCreateHosts = async () => {
     if (!selectedProfile) return;
     try {
-      // Save template first
-      await api.patch(`/settings/profiles/managed/${selectedProfile.uuid}`, { hostTemplate: localTemplate });
+      // Save template and index start first
+      await api.patch(`/settings/profiles/managed/${selectedProfile.uuid}`, { hostTemplate: localTemplate, hostIndexStart: localHostIndexStart });
       const { data } = await api.post(`/settings/profiles/managed/${selectedProfile.uuid}/hosts/create`);
       setLocalHostMappings(data.mappings || []);
       updateProfileInState(selectedProfile.uuid, { hostMappings: data.mappings || [], hostTemplate: localTemplate });
@@ -956,6 +959,15 @@ export default function ProfilesPage() {
                         onChange={e => setLocalTemplate(e.target.value)}
                         helperText="Переменные: {countryFlag} {countryCode} {nodeName} {nodeAddress} {inboundType} {index}"
                         sx={{ mb: 1 }}
+                      />
+                      <TextField
+                        size="small"
+                        label="Начальный индекс {index}"
+                        type="number"
+                        value={localHostIndexStart}
+                        onChange={e => setLocalHostIndexStart(Math.max(1, parseInt(e.target.value) || 1))}
+                        inputProps={{ min: 1 }}
+                        sx={{ mb: 1, width: 200 }}
                       />
                       {checkTemplateWarning() && (
                         <Alert severity="warning" sx={{ mb: 1 }}>

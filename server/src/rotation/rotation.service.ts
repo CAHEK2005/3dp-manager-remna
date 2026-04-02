@@ -28,6 +28,7 @@ export interface ManagedProfile {
   lastRotationStatus: 'success' | 'error' | null;
   lastRotationError: string;
   profileDomains?: string[];
+  hostIndexStart?: number;
 }
 
 @Injectable()

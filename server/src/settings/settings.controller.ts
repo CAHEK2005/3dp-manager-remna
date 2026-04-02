@@ -179,10 +179,18 @@ export class SettingsController {
       throw new HttpException('Ошибка получения профиля из Remnawave', HttpStatus.BAD_REQUEST);
     }
 
-    const inbounds: any[] = rwProfile?.inbounds || [];
-    if (inbounds.length === 0) {
+    const configInbounds: any[] = rwProfile?.config?.inbounds || [];
+    const rwInbounds: any[] = rwProfile?.inbounds || [];
+
+    if (configInbounds.length === 0) {
       throw new HttpException('Сначала запустите ротацию для генерации инбаундов', HttpStatus.BAD_REQUEST);
     }
+
+    const tagToUuid = new Map<string, string>(
+      rwInbounds
+        .filter((i: any) => i.tag && i.uuid)
+        .map((i: any) => [i.tag as string, i.uuid as string]),
+    );
 
     let nodeName = '';
     let countryCode = '';
@@ -206,13 +214,20 @@ export class SettingsController {
       ? Array.from(countryCode.toUpperCase()).map(c => String.fromCodePoint(c.charCodeAt(0) - 65 + 0x1F1E6)).join('')
       : countryCode;
 
+    const startIndex = profile.hostIndexStart ?? 1;
     const newMappings: { tag: string; hostUuid: string }[] = [];
     let created = 0;
 
-    for (let i = 0; i < inbounds.length; i++) {
-      const inbound = inbounds[i];
-      const inboundTag: string = inbound.tag || '';
+    for (let i = 0; i < configInbounds.length; i++) {
+      const configInbound = configInbounds[i];
+      const inboundTag: string = configInbound.tag || '';
       const inboundType = inboundTag.replace(/-rwm(-\d+)?$/, '');
+      const inboundUuid = tagToUuid.get(inboundTag);
+
+      if (!inboundUuid) {
+        this.logger.warn(`createHostsForProfile: UUID не найден для тега ${inboundTag} — пропускаем`);
+        continue;
+      }
 
       let remark = (profile.hostTemplate || '{countryCode} {nodeName} - {inboundType}')
         .replace('{countryFlag}', countryFlag)
@@ -220,16 +235,16 @@ export class SettingsController {
         .replace('{nodeName}', nodeName)
         .replace('{nodeAddress}', nodeAddress)
         .replace('{inboundType}', inboundType)
-        .replace('{index}', String(i + 1));
+        .replace('{index}', String(startIndex + i));
 
       remark = remark.slice(0, 40);
 
       try {
         const newHost = await this.remnavaveService.createHost({
-          inbound: { configProfileUuid: uuid, configProfileInboundUuid: inbound.uuid },
+          inbound: { configProfileUuid: uuid, configProfileInboundUuid: inboundUuid },
           remark,
           address: nodeAddress,
-          port: inbound.port ?? inbound.rawInbound?.port ?? 0,
+          port: configInbound.port ?? 0,
           nodes: profile.nodeUuid ? [profile.nodeUuid] : undefined,
         });
 
