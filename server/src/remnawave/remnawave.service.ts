@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { v4 as uuidv4 } from 'uuid';
 import { Setting } from '../settings/entities/setting.entity';
 
 @Injectable()
@@ -142,7 +143,38 @@ export class RemnavaveService {
     const { url, apiKey } = await this.getSettings();
     if (!url || !apiKey) throw new Error('Remnawave credentials not configured');
 
-    const defaultConfig = {};
+    const tmpTag = `init-${Date.now().toString(36)}-rwm`;
+    const defaultConfig = {
+      inbounds: [
+        {
+          tag: tmpTag,
+          protocol: 'vless',
+          port: 44321,
+          settings: {
+            clients: [{ id: uuidv4(), flow: '', email: 'placeholder' }],
+            decryption: 'none',
+            fallbacks: [],
+          },
+          streamSettings: {
+            network: 'tcp',
+            security: 'none',
+            tcpSettings: { acceptProxyProtocol: false, header: { type: 'none' } },
+          },
+          sniffing: { enabled: false, destOverride: [] },
+        },
+      ],
+      outbounds: [
+        { tag: 'DIRECT', protocol: 'freedom' },
+        { tag: 'BLOCK', protocol: 'blackhole' },
+      ],
+      routing: {
+        rules: [
+          { type: 'field', ip: ['geoip:private'], outboundTag: 'BLOCK' },
+          { type: 'field', domain: ['geosite:private'], outboundTag: 'BLOCK' },
+          { type: 'field', protocol: ['bittorrent'], outboundTag: 'BLOCK' },
+        ],
+      },
+    };
     const body = { name, config: config ?? defaultConfig };
     this.logger.log(`createConfigProfile request: ${JSON.stringify(body)}`);
 
