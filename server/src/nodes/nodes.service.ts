@@ -140,8 +140,8 @@ export class NodesService {
       `    restart: always`,
       `    network_mode: host`,
       `    environment:`,
-      `      APP_PORT: "${nodePort}"`,
-      `      SSL_CERT: "${sslCert}"`,
+      `      NODE_PORT: "${nodePort}"`,
+      `      SECRET_KEY: "${sslCert}"`,
     ].join('\n');
 
     const commands: string[] = [
