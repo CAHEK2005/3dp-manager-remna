@@ -3,6 +3,7 @@ import Layout from './components/Layout';
 import ProfilesPage from './pages/ProfilesPage';
 import SettingsPage from './pages/SettingsPage';
 import DomainsPage from './pages/DomainsPage';
+import NodesPage from './pages/NodesPage';
 import LoginPage from './pages/LoginPage';
 import { ThemeProvider } from './ThemeContext';
 import { AuthProvider } from './auth/AuthContext';
@@ -29,6 +30,7 @@ function App() {
             }>
               <Route index element={<ProfilesPage />} />
               <Route path="profiles" element={<ProfilesPage />} />
+              <Route path="nodes" element={<NodesPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="domains" element={<DomainsPage />} />
             </Route>

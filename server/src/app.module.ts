@@ -13,6 +13,7 @@ import { RotationModule } from './rotation/rotation.module';
 import { DomainsModule } from './domains/domains.module';
 import { SettingsModule } from './settings/settings.module';
 import { AuthModule } from './auth/auth.module';
+import { NodesModule } from './nodes/nodes.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { APP_GUARD } from '@nestjs/core';
 
@@ -35,6 +36,7 @@ import { APP_GUARD } from '@nestjs/core';
     DomainsModule,
     SettingsModule,
     AuthModule,
+    NodesModule,
   ],
   controllers: [AppController],
   providers: [

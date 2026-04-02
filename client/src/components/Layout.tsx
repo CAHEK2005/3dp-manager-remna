@@ -2,7 +2,7 @@ import {
   Toolbar, Drawer, List, ListItem,
   ListItemButton, ListItemIcon, ListItemText, Box, useMediaQuery, useTheme
 } from '@mui/material';
-import { Layers, Dns, Settings } from '@mui/icons-material';
+import { Layers, Dns, Settings, Storage } from '@mui/icons-material';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useState } from 'react';
 
@@ -23,6 +23,7 @@ export default function Layout() {
 
   const menuItems = [
     { text: 'Профили',   icon: <Layers />,   path: '/' },
+    { text: 'Ноды',      icon: <Storage />,  path: '/nodes' },
     { text: 'Домены',    icon: <Dns />,      path: '/domains' },
     { text: 'Настройки', icon: <Settings />, path: '/settings' },
   ];

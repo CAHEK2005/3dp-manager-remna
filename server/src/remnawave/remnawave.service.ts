@@ -277,4 +277,100 @@ export class RemnavaveService {
     const data = await res.json();
     return data.response;
   }
+
+  async getKeygenPubKey(): Promise<string> {
+    const { url, apiKey } = await this.getSettings();
+    if (!url || !apiKey) throw new Error('Remnawave credentials not configured');
+
+    const res = await fetch(`${url}/api/keygen`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    if (!res.ok) throw new Error(`Failed to get keygen pubKey: ${res.status}`);
+    const data = await res.json();
+    return data.response?.pubKey || '';
+  }
+
+  async createNode(body: {
+    name: string;
+    address: string;
+    port?: number;
+    countryCode?: string;
+    configProfile: { activeConfigProfileUuid: string; activeInbounds: string[] };
+  }): Promise<any> {
+    const { url, apiKey } = await this.getSettings();
+    if (!url || !apiKey) throw new Error('Remnawave credentials not configured');
+
+    const res = await fetch(`${url}/api/nodes`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Failed to create node: ${res.status} ${errText}`);
+    }
+    const data = await res.json();
+    return data.response;
+  }
+
+  async deleteNode(uuid: string): Promise<any> {
+    const { url, apiKey } = await this.getSettings();
+    if (!url || !apiKey) throw new Error('Remnawave credentials not configured');
+
+    const res = await fetch(`${url}/api/nodes/${uuid}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Failed to delete node: ${res.status} ${errText}`);
+    }
+    const data = await res.json();
+    return data.response;
+  }
+
+  async enableNode(uuid: string): Promise<any> {
+    const { url, apiKey } = await this.getSettings();
+    if (!url || !apiKey) throw new Error('Remnawave credentials not configured');
+
+    const res = await fetch(`${url}/api/nodes/${uuid}/actions/enable`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    if (!res.ok) throw new Error(`Failed to enable node: ${res.status}`);
+    const data = await res.json();
+    return data.response;
+  }
+
+  async disableNode(uuid: string): Promise<any> {
+    const { url, apiKey } = await this.getSettings();
+    if (!url || !apiKey) throw new Error('Remnawave credentials not configured');
+
+    const res = await fetch(`${url}/api/nodes/${uuid}/actions/disable`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    if (!res.ok) throw new Error(`Failed to disable node: ${res.status}`);
+    const data = await res.json();
+    return data.response;
+  }
+
+  async restartNode(uuid: string): Promise<any> {
+    const { url, apiKey } = await this.getSettings();
+    if (!url || !apiKey) throw new Error('Remnawave credentials not configured');
+
+    const res = await fetch(`${url}/api/nodes/${uuid}/actions/restart`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    if (!res.ok) throw new Error(`Failed to restart node: ${res.status}`);
+    const data = await res.json();
+    return data.response;
+  }
 }
