@@ -202,6 +202,10 @@ export class SettingsController {
       }
     }
 
+    const countryFlag = countryCode.length === 2
+      ? Array.from(countryCode.toUpperCase()).map(c => String.fromCodePoint(c.charCodeAt(0) - 65 + 0x1F1E6)).join('')
+      : countryCode;
+
     const newMappings: { tag: string; hostUuid: string }[] = [];
     let created = 0;
 
@@ -211,6 +215,7 @@ export class SettingsController {
       const inboundType = inboundTag.replace(/-rwm(-\d+)?$/, '');
 
       let remark = (profile.hostTemplate || '{countryCode} {nodeName} - {inboundType}')
+        .replace('{countryFlag}', countryFlag)
         .replace('{countryCode}', countryCode)
         .replace('{nodeName}', nodeName)
         .replace('{nodeAddress}', nodeAddress)

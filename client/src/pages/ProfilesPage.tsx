@@ -444,14 +444,21 @@ export default function ProfilesPage() {
 
   // ── Tab 2: Hosts ──────────────────────────────────────────────────────────
 
+  const countryCodeToFlag = (code: string): string => {
+    if (!code || code.length !== 2) return code;
+    return Array.from(code.toUpperCase()).map(c => String.fromCodePoint(c.charCodeAt(0) - 65 + 0x1F1E6)).join('');
+  };
+
   const checkTemplateWarning = (): boolean => {
     const node = nodes.find(n => n.uuid === localNodeUuid);
     const countryCode = node?.countryCode || '';
+    const countryFlag = countryCodeToFlag(countryCode);
     const nodeName = node?.name || '';
     const nodeAddress = node?.address || '';
     for (let i = 0; i < localInbounds.length; i++) {
       const inboundType = localInbounds[i].type;
       const remark = localTemplate
+        .replace('{countryFlag}', countryFlag)
         .replace('{countryCode}', countryCode)
         .replace('{nodeName}', nodeName)
         .replace('{nodeAddress}', nodeAddress)
@@ -947,7 +954,7 @@ export default function ProfilesPage() {
                         label="Шаблон имени хоста"
                         value={localTemplate}
                         onChange={e => setLocalTemplate(e.target.value)}
-                        helperText="Переменные: {countryCode} {nodeName} {nodeAddress} {inboundType} {index}"
+                        helperText="Переменные: {countryFlag} {countryCode} {nodeName} {nodeAddress} {inboundType} {index}"
                         sx={{ mb: 1 }}
                       />
                       {checkTemplateWarning() && (
