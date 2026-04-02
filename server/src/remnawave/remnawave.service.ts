@@ -142,20 +142,7 @@ export class RemnavaveService {
     const { url, apiKey } = await this.getSettings();
     if (!url || !apiKey) throw new Error('Remnawave credentials not configured');
 
-    const defaultConfig = {
-      inbounds: [],
-      outbounds: [
-        { tag: 'DIRECT', protocol: 'freedom' },
-        { tag: 'BLOCK', protocol: 'blackhole' },
-      ],
-      routing: {
-        rules: [
-          { type: 'field', ip: ['geoip:private'], outboundTag: 'BLOCK' },
-          { type: 'field', domain: ['geosite:private'], outboundTag: 'BLOCK' },
-          { type: 'field', protocol: ['bittorrent'], outboundTag: 'BLOCK' },
-        ],
-      },
-    };
+    const defaultConfig = {};
     const body = { name, config: config ?? defaultConfig };
     this.logger.log(`createConfigProfile request: ${JSON.stringify(body)}`);
 
