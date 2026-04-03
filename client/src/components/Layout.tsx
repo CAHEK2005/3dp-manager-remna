@@ -2,7 +2,7 @@ import {
   Toolbar, Drawer, List, ListItem,
   ListItemButton, ListItemIcon, ListItemText, Box, useMediaQuery, useTheme
 } from '@mui/material';
-import { Layers, Dns, Settings, Storage, Dashboard } from '@mui/icons-material';
+import { Layers, Dns, Settings, Storage, Dashboard, Terminal } from '@mui/icons-material';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useState } from 'react';
 
@@ -26,6 +26,7 @@ export default function Layout() {
     { text: 'Профили',   icon: <Layers />,    path: '/profiles' },
     { text: 'Ноды',      icon: <Storage />,   path: '/nodes' },
     { text: 'Домены',    icon: <Dns />,       path: '/domains' },
+    { text: 'Скрипты',   icon: <Terminal />,  path: '/scripts' },
     { text: 'Настройки', icon: <Settings />,  path: '/settings' },
   ];
 

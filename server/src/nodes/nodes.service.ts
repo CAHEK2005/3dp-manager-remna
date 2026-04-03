@@ -5,6 +5,7 @@ import { Client } from 'ssh2';
 import { v4 as uuidv4 } from 'uuid';
 import { Setting } from '../settings/entities/setting.entity';
 import { RemnavaveService } from '../remnawave/remnawave.service';
+import { ScriptsService } from '../scripts/scripts.service';
 
 export interface InstallNodeDto {
   name: string;
@@ -79,6 +80,7 @@ export class NodesService {
     @InjectRepository(Setting)
     private settingRepo: Repository<Setting>,
     private remnavaveService: RemnavaveService,
+    private scriptsService: ScriptsService,
   ) {}
 
   getJobStatus(jobId: string): { status: string; logs: string[]; nodeUuid?: string } | null {
@@ -165,10 +167,14 @@ export class NodesService {
       );
     }
 
-    this.runSsh(dto, sshUser, commands, job).catch((err) => {
-      job.logs.push(`[FATAL] ${err?.message || String(err)}`);
-      job.status = 'error';
-    });
+    this.runSsh(dto, sshUser, commands, job)
+      .then(() => {
+        this.scriptsService.addSshNodeFromInstall(dto, nodeUuid, dto.name).catch(() => {});
+      })
+      .catch((err) => {
+        job.logs.push(`[FATAL] ${err?.message || String(err)}`);
+        job.status = 'error';
+      });
 
     return { jobId, nodeUuid };
   }

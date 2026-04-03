@@ -15,6 +15,7 @@ import { SettingsModule } from './settings/settings.module';
 import { AuthModule } from './auth/auth.module';
 import { NodesModule } from './nodes/nodes.module';
 import { TelegramModule } from './telegram/telegram.module';
+import { ScriptsModule } from './scripts/scripts.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { APP_GUARD } from '@nestjs/core';
 
@@ -39,6 +40,7 @@ import { APP_GUARD } from '@nestjs/core';
     AuthModule,
     NodesModule,
     TelegramModule,
+    ScriptsModule,
   ],
   controllers: [AppController],
   providers: [

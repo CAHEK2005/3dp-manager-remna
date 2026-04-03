@@ -41,10 +41,11 @@ interface ManagedProfile {
   hostMappings: HostMapping[];
   hostTemplate: string;
   rotationEnabled: boolean;
-  rotationMode: 'interval' | 'schedule';
+  rotationMode: 'interval' | 'schedule' | 'days-of-week';
   rotationInterval: number;
   rotationScheduleTime: string;
   rotationTimezone: string;
+  rotationScheduleDays?: number[];
   lastRotationTimestamp: number;
   lastRotationStatus: 'success' | 'error' | null;
   lastRotationError: string;
@@ -118,6 +119,8 @@ function formatDate(ts: number): string {
   });
 }
 
+const DAYS_SHORT = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+
 function getNextRotationTime(p: ManagedProfile): string {
   if (!p.rotationEnabled) return 'Пауза';
   if (p.rotationMode === 'interval') {
@@ -127,6 +130,11 @@ function getNextRotationTime(p: ManagedProfile): string {
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
+  }
+  if (p.rotationMode === 'days-of-week') {
+    if (!p.rotationScheduleDays?.length) return 'Дни не выбраны';
+    const dayNames = p.rotationScheduleDays.map(d => DAYS_SHORT[d]).join(', ');
+    return `${dayNames} в ${p.rotationScheduleTime} (${p.rotationTimezone})`;
   }
   return `Ежедневно в ${p.rotationScheduleTime} (${p.rotationTimezone})`;
 }
@@ -196,10 +204,11 @@ export default function ProfilesPage() {
   const [localExcludedPorts, setLocalExcludedPorts] = useState<number[]>([]);
   const [excludedPortInput, setExcludedPortInput] = useState('');
   const [localRotationEnabled, setLocalRotationEnabled] = useState(true);
-  const [localRotationMode, setLocalRotationMode] = useState<'interval' | 'schedule'>('interval');
+  const [localRotationMode, setLocalRotationMode] = useState<'interval' | 'schedule' | 'days-of-week'>('interval');
   const [localInterval, setLocalInterval] = useState(1440);
   const [localScheduleTime, setLocalScheduleTime] = useState('03:00');
   const [localTimezone, setLocalTimezone] = useState('Europe/Moscow');
+  const [localScheduleDays, setLocalScheduleDays] = useState<number[]>([]);
 
   // ── Tab 4: SNI Domains ────────────────────────────────────────────────────
   const [localProfileDomains, setLocalProfileDomains] = useState<string[]>([]);
@@ -280,6 +289,7 @@ export default function ProfilesPage() {
     setLocalInterval(selectedProfile.rotationInterval || 1440);
     setLocalScheduleTime(selectedProfile.rotationScheduleTime || '03:00');
     setLocalTimezone(selectedProfile.rotationTimezone || 'Europe/Moscow');
+    setLocalScheduleDays(selectedProfile.rotationScheduleDays || []);
     setLocalProfileDomains(selectedProfile.profileDomains || []);
     setDomainInput('');
   }, [selectedProfile?.uuid]);
@@ -529,6 +539,7 @@ export default function ProfilesPage() {
         rotationInterval: localInterval,
         rotationScheduleTime: localScheduleTime,
         rotationTimezone: localTimezone,
+        rotationScheduleDays: localScheduleDays,
       });
       updateProfileInState(selectedProfile.uuid, {
         rotationEnabled: localRotationEnabled,
@@ -536,6 +547,7 @@ export default function ProfilesPage() {
         rotationInterval: localInterval,
         rotationScheduleTime: localScheduleTime,
         rotationTimezone: localTimezone,
+        rotationScheduleDays: localScheduleDays,
       });
       showMsg('success', 'Расписание сохранено');
     } catch (e: any) {
@@ -1129,7 +1141,7 @@ export default function ProfilesPage() {
                     </Stack>
 
                     <Typography variant="subtitle2" gutterBottom>Режим</Typography>
-                    <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2 }}>
                       <Button
                         variant={localRotationMode === 'interval' ? 'contained' : 'outlined'}
                         size="small"
@@ -1143,6 +1155,13 @@ export default function ProfilesPage() {
                         onClick={() => setLocalRotationMode('schedule')}
                       >
                         По расписанию
+                      </Button>
+                      <Button
+                        variant={localRotationMode === 'days-of-week' ? 'contained' : 'outlined'}
+                        size="small"
+                        onClick={() => setLocalRotationMode('days-of-week')}
+                      >
+                        По дням недели
                       </Button>
                     </Stack>
 
@@ -1199,12 +1218,69 @@ export default function ProfilesPage() {
                       </Box>
                     )}
 
+                    {localRotationMode === 'days-of-week' && (
+                      <Box sx={{ mb: 2 }}>
+                        <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+                          Дни недели
+                        </Typography>
+                        <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mb: 2 }}>
+                          {[
+                            { label: 'Пн', value: 1 },
+                            { label: 'Вт', value: 2 },
+                            { label: 'Ср', value: 3 },
+                            { label: 'Чт', value: 4 },
+                            { label: 'Пт', value: 5 },
+                            { label: 'Сб', value: 6 },
+                            { label: 'Вс', value: 0 },
+                          ].map(day => {
+                            const selected = localScheduleDays.includes(day.value);
+                            return (
+                              <Button
+                                key={day.value}
+                                variant={selected ? 'contained' : 'outlined'}
+                                size="small"
+                                onClick={() => setLocalScheduleDays(prev =>
+                                  selected ? prev.filter(d => d !== day.value) : [...prev, day.value]
+                                )}
+                                sx={{ minWidth: 42, px: 0 }}
+                              >
+                                {day.label}
+                              </Button>
+                            );
+                          })}
+                        </Stack>
+                        <Stack direction={isMobile ? 'column' : 'row'} spacing={2}>
+                          <TextField
+                            label="Время"
+                            type="time"
+                            size="small"
+                            value={localScheduleTime}
+                            onChange={e => setLocalScheduleTime(e.target.value)}
+                            sx={{ width: 160 }}
+                            slotProps={{ inputLabel: { shrink: true } }}
+                          />
+                          <FormControl size="small" sx={{ minWidth: 260 }}>
+                            <InputLabel>Часовой пояс</InputLabel>
+                            <Select
+                              value={localTimezone}
+                              label="Часовой пояс"
+                              onChange={(e: SelectChangeEvent) => setLocalTimezone(e.target.value)}
+                            >
+                              {TIMEZONES.map(tz => (
+                                <MenuItem key={tz.value} value={tz.value}>{tz.label}</MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Stack>
+                      </Box>
+                    )}
+
                     <Divider sx={{ my: 2 }} />
                     <Typography variant="body2" color="textSecondary">
                       Последняя ротация: {formatDate(selectedProfile.lastRotationTimestamp)}
                     </Typography>
                     <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-                      Следующая: {getNextRotationTime({ ...selectedProfile, rotationEnabled: localRotationEnabled, rotationMode: localRotationMode, rotationInterval: localInterval, rotationScheduleTime: localScheduleTime, rotationTimezone: localTimezone })}
+                      Следующая: {getNextRotationTime({ ...selectedProfile, rotationEnabled: localRotationEnabled, rotationMode: localRotationMode, rotationInterval: localInterval, rotationScheduleTime: localScheduleTime, rotationTimezone: localTimezone, rotationScheduleDays: localScheduleDays })}
                     </Typography>
 
                     <Stack direction="row" spacing={2}>

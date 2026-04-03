@@ -5,6 +5,7 @@ import SettingsPage from './pages/SettingsPage';
 import DomainsPage from './pages/DomainsPage';
 import NodesPage from './pages/NodesPage';
 import DashboardPage from './pages/DashboardPage';
+import ScriptsPage from './pages/ScriptsPage';
 import LoginPage from './pages/LoginPage';
 import { ThemeProvider } from './ThemeContext';
 import { AuthProvider } from './auth/AuthContext';
@@ -35,6 +36,7 @@ function App() {
               <Route path="nodes" element={<NodesPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="domains" element={<DomainsPage />} />
+              <Route path="scripts" element={<ScriptsPage />} />
             </Route>
             <Route path="*" element={<NotFoundPage />} />
           </Routes>

@@ -30,10 +30,11 @@ export interface ManagedProfile {
   hostMappings: { tag: string; hostUuid: string }[];
   hostTemplate: string;
   rotationEnabled: boolean;
-  rotationMode: 'interval' | 'schedule';
+  rotationMode: 'interval' | 'schedule' | 'days-of-week';
   rotationInterval: number;
   rotationScheduleTime: string;
   rotationTimezone: string;
+  rotationScheduleDays?: number[];
   lastRotationTimestamp: number;
   lastRotationStatus: 'success' | 'error' | null;
   lastRotationError: string;
@@ -192,6 +193,8 @@ export class RotationService implements OnModuleInit {
     if (p.rotationMode === 'interval') {
       const diffMin = (Date.now() - (p.lastRotationTimestamp || 0)) / 60000;
       return diffMin >= (p.rotationInterval || 1440);
+    } else if (p.rotationMode === 'days-of-week') {
+      return this.isDaysOfWeekDue(p);
     } else {
       return this.isScheduleDue(p);
     }
@@ -208,6 +211,30 @@ export class RotationService implements OnModuleInit {
     const get = (t: string) => parts.find(x => x.type === t)?.value || '';
     const currentTime = `${get('hour')}:${get('minute')}`;
     const currentDate = `${get('year')}-${get('month')}-${get('day')}`;
+    if (currentTime !== p.rotationScheduleTime) return false;
+    if (!p.lastRotationTimestamp) return true;
+    const lastDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(p.lastRotationTimestamp));
+    return lastDate !== currentDate;
+  }
+
+  private isDaysOfWeekDue(p: ManagedProfile): boolean {
+    if (!p.rotationScheduleDays?.length) return false;
+    const now = new Date();
+    const tz = p.rotationTimezone || 'Europe/Moscow';
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      hour: '2-digit', minute: '2-digit', hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => parts.find(x => x.type === t)?.value || '';
+    const currentTime = `${get('hour')}:${get('minute')}`;
+    const currentDate = `${get('year')}-${get('month')}-${get('day')}`;
+    const localDate = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+    const currentDayOfWeek = localDate.getDay();
+    if (!p.rotationScheduleDays.includes(currentDayOfWeek)) return false;
     if (currentTime !== p.rotationScheduleTime) return false;
     if (!p.lastRotationTimestamp) return true;
     const lastDate = new Intl.DateTimeFormat('en-CA', {

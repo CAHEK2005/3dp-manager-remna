@@ -55,6 +55,9 @@ React (Nginx :80) → NestJS API (:3000) → PostgreSQL (:5432)
 - **rotation** — `RotationService` хранит список `ManagedProfile[]` как JSON в `Setting.key = 'managed_profiles'`. Cron каждую минуту проверяет, какие профили пора ротировать. Поддерживает два режима: `interval` (минуты) и `schedule` (HH:MM + timezone). `performRotation`: генерирует инбаунды → обновляет профиль в Remnawave → `syncHosts` → `applyProfileToNode`.
 - **settings** — CRUD key-value настроек в БД + прокси к Remnawave API (profiles, nodes, hosts). Нет отдельного `SettingsService` — `SettingsController` напрямую инжектирует репозиторий. При сохранении `remnawave_url` автоматически определяет GeoIP страны через `ip-api.com`.
 - **domains** — CRUD белого списка доменов для SNI (используются при `sni: 'random'` в inboundsConfig). Поддерживает пагинацию `?page=&limit=`, bulk-загрузку через `POST /domains/upload`, превью по URL через `POST /domains/preview-url` (возвращает категории доменов), получение всех без пагинации `GET /domains/all`, удаление всех `DELETE /domains/all`.
+- **scripts** — SSH-ноды с сохранёнными credentials (`ssh_nodes` JSON в Setting) + bash-скрипты (`scripts` JSON в Setting). Встроенные скрипты сидируются при старте. Выполнение скрипта — параллельно на выбранных SSH-нодах через `ssh2`, асинхронный tracking через in-memory Map jobs. SSH credentials автоматически сохраняются после установки ноды через NodesService.
+- **nodes** — установка и управление нодами Remnawave через SSH. `NodesService` подключается к серверу по SSH (библиотека `ssh2`), устанавливает Remnawave Node, применяет sysctl-оптимизации, регистрирует ноду в Remnawave API. Установка асинхронная — возвращает `jobId`, статус/логи опрашиваются отдельным запросом.
+- **telegram** — отправка уведомлений в Telegram после каждой ротации. Настройки читаются из БД при каждом вызове: `telegram_bot_token`, `telegram_chat_id`, `telegram_topic_id`, `telegram_notify_on_error`, `telegram_notify_on_success`. `TelegramService` инжектируется в `RotationService`.
 
 ### ManagedProfile (ключевой тип)
 
@@ -70,10 +73,11 @@ interface ManagedProfile {
   hostMappings: { tag: string; hostUuid: string }[];  // UUID хостов для syncHosts (tag = полный тег инбаунда, напр. 'vless-tcp-reality-rwm')
   hostTemplate: string;      // шаблон remark: '{countryCode} {nodeName} - {inboundType}'
   rotationEnabled: boolean;
-  rotationMode: 'interval' | 'schedule';
+  rotationMode: 'interval' | 'schedule' | 'days-of-week';
   rotationInterval: number;  // минуты
   rotationScheduleTime: string; // 'HH:MM'
   rotationTimezone: string;
+  rotationScheduleDays?: number[];  // дни недели для режима days-of-week: 0=Вс, 1=Пн, ..., 6=Сб
   lastRotationTimestamp: number;
   lastRotationStatus: 'success' | 'error' | null;
   lastRotationError: string;
@@ -117,11 +121,27 @@ interface ManagedProfile {
 
 **rotation:**
 - `POST /rotation/rotate-all` — ротация всех профилей с `rotationEnabled: true`
+- `GET /rotation/history` — история ротаций (хранится в `setting.key = 'rotation_history'` как JSON, до 100 последних записей)
+
+**scripts:**
+- `GET /scripts/ssh-nodes` — список SSH-нод
+- `POST /scripts/ssh-nodes` — добавить SSH-ноду; `PATCH /scripts/ssh-nodes/:id` — обновить; `DELETE /scripts/ssh-nodes/:id` — удалить
+- `GET /scripts/scripts` — список скриптов (встроенные + пользовательские)
+- `POST /scripts/scripts` — создать скрипт; `PATCH /scripts/scripts/:id` — обновить; `DELETE /scripts/scripts/:id` — удалить (только пользовательские)
+- `POST /scripts/execute` — запустить скрипт на нодах; body: `{ scriptId, nodeIds[] }`; возвращает `{ jobId }`
+- `GET /scripts/execute/:jobId` — статус выполнения с логами по каждой ноде
+
+**nodes:**
+- `GET /nodes` — список нод Remnawave (прокси)
+- `POST /nodes/install` — запустить установку ноды по SSH (асинхронно); body: `InstallNodeDto` (ip, sshPort, authType, password/sshKey, profileUuid, nodePort, enableOptimization и др.); возвращает `{ jobId }`
+- `GET /nodes/install/:jobId` — статус/логи задачи установки; возвращает `{ status, logs, nodeUuid? }`
+- `POST /nodes/:uuid/enable`, `POST /nodes/:uuid/disable`, `POST /nodes/:uuid/restart` — управление нодой через Remnawave API
+- `DELETE /nodes/:uuid` — удалить ноду из Remnawave
 
 ### База данных (TypeORM + PostgreSQL)
 
 Сущности:
-- **Setting** — key-value хранилище всей конфигурации. Ключевые записи: `remnawave_url`, `remnawave_api_key`, `managed_profiles` (JSON), `remnawave_geo_flag`, `remnawave_geo_country`.
+- **Setting** — key-value хранилище всей конфигурации. Ключевые записи: `remnawave_url`, `remnawave_api_key`, `managed_profiles` (JSON), `remnawave_geo_flag`, `remnawave_geo_country`, `rotation_history` (JSON), `telegram_bot_token`, `telegram_chat_id`, `telegram_topic_id`, `telegram_notify_on_error`, `telegram_notify_on_success`.
 - **Domain** — доменное имя для белого списка SNI (`name`, `isEnabled`).
 
 `synchronize: true` — TypeORM автоматически синхронизирует схему (только две сущности: Setting, Domain).
@@ -133,8 +153,10 @@ interface ManagedProfile {
 - **auth/** — `AuthContext` (JWT в localStorage), `RequireAuth`, `PublicRoute`, `AxiosInterceptor` (редирект на `/login` при 401)
 - **ThemeContext.tsx** — переключение светлой/тёмной темы MUI
 - **pages/**:
-  - `ProfilesPage` — главная страница, управление ManagedProfiles (CRUD, ротация, создание хостов)
-  - `SettingsPage` — настройки подключения к Remnawave + общие параметры
+  - `DashboardPage` — обзорная страница: статус профилей, история ротаций, состояние нод Remnawave
+  - `ProfilesPage` — управление ManagedProfiles (CRUD, ротация, создание хостов)
+  - `NodesPage` — установка новых нод через SSH и управление существующими (enable/disable/restart/delete)
+  - `SettingsPage` — настройки подключения к Remnawave + Telegram-уведомления
   - `DomainsPage` — белый список доменов SNI
   - `LoginPage`, `NotFoundPage`
 - **components/** — `Layout` (Outlet + nav), `Header`, `Footer`, `UrlImportDialog` (диалог импорта доменов из URL с выбором категорий, используется в `DomainsPage`)
