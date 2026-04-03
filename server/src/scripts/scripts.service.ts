@@ -283,9 +283,12 @@ export class ScriptsService implements OnModuleInit {
       const conn = new Client();
 
       conn.on('ready', () => {
-        result.logs.push('[SSH] Подключено');
-        // Выполняем скрипт через bash -e (прерывать при ошибке)
-        conn.exec(`bash -e << 'SCRIPT_EOF'\n${content}\nSCRIPT_EOF`, (err, stream) => {
+        const useSudo = node.sshUser && node.sshUser !== 'root';
+        result.logs.push(useSudo ? '[SSH] Подключено (sudo)' : '[SSH] Подключено');
+        const cmd = useSudo
+          ? `sudo bash -e << 'SCRIPT_EOF'\n${content}\nSCRIPT_EOF`
+          : `bash -e << 'SCRIPT_EOF'\n${content}\nSCRIPT_EOF`;
+        conn.exec(cmd, (err, stream) => {
           if (err) {
             result.logs.push(`[ERROR] ${err.message}`);
             conn.end();

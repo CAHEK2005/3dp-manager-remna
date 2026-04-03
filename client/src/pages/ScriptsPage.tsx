@@ -76,6 +76,15 @@ export default function ScriptsPage() {
   const [nodeForm, setNodeForm] = useState<Partial<SshNode>>(blankNode());
   const [nodeEditId, setNodeEditId] = useState<string | null>(null);
 
+  // ── Script content expand ─────────────────────────────────────────────────
+  const [expandedScripts, setExpandedScripts] = useState<Set<string>>(new Set());
+  const toggleExpand = (id: string) =>
+    setExpandedScripts(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
   // ── Script dialog ──────────────────────────────────────────────────────────
   const [scriptDialog, setScriptDialog] = useState(false);
   const [scriptForm, setScriptForm] = useState<Partial<Script>>({ name: '', description: '', content: '' });
@@ -402,21 +411,33 @@ export default function ScriptsPage() {
                             {s.description}
                           </Typography>
                         )}
-                        <Box
-                          component="pre"
-                          sx={{
-                            fontSize: '0.75rem',
-                            bgcolor: 'action.hover',
-                            borderRadius: 1,
-                            p: 1,
-                            overflowX: 'auto',
-                            maxHeight: 100,
-                            m: 0,
-                            fontFamily: 'monospace',
-                          }}
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => toggleExpand(s.id)}
+                          sx={{ px: 0, minWidth: 0, textTransform: 'none', color: 'text.secondary' }}
                         >
-                          {s.content}
-                        </Box>
+                          {expandedScripts.has(s.id) ? '▲ Скрыть' : '▼ Показать скрипт'}
+                        </Button>
+                        {expandedScripts.has(s.id) && (
+                          <Box
+                            component="pre"
+                            sx={{
+                              fontSize: '0.75rem',
+                              bgcolor: 'action.hover',
+                              borderRadius: 1,
+                              p: 1,
+                              overflowX: 'auto',
+                              maxHeight: 200,
+                              overflowY: 'auto',
+                              mt: 0.5,
+                              m: 0,
+                              fontFamily: 'monospace',
+                            }}
+                          >
+                            {s.content}
+                          </Box>
+                        )}
                       </Box>
                       <Stack direction="column" spacing={1} sx={{ flexShrink: 0 }}>
                         <Button
