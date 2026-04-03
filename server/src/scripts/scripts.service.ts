@@ -204,6 +204,14 @@ export class ScriptsService implements OnModuleInit {
     });
   }
 
+  private maskSecrets(text: string, mask: string[]): string {
+    let result = text;
+    for (const val of mask) {
+      result = result.split(val).join('***');
+    }
+    return result;
+  }
+
   private async saveSetting(key: string, value: string) {
     let s = await this.settingRepo.findOne({ where: { key } });
     if (!s) s = this.settingRepo.create({ key });
@@ -308,6 +316,8 @@ export class ScriptsService implements OnModuleInit {
       ? this.substituteVariables(script.content, variables)
       : script.content;
 
+    const sensitiveValues = Object.values(variables || {}).filter(v => v.length > 3);
+
     const jobId = uuidv4();
     const job: ScriptJob = {
       scriptName: script.name,
@@ -325,10 +335,10 @@ export class ScriptsService implements OnModuleInit {
     const promises = targetNodes.map(async (node, idx) => {
       const result = job.results[idx];
       try {
-        await this.runScriptOnNode(node, content, result);
+        await this.runScriptOnNode(node, content, result, sensitiveValues);
         result.status = 'success';
       } catch (e) {
-        result.logs.push(`[ERROR] ${e?.message || String(e)}`);
+        result.logs.push(this.maskSecrets(`[ERROR] ${e?.message || String(e)}`, sensitiveValues));
         result.status = 'error';
       }
     });
@@ -346,7 +356,7 @@ export class ScriptsService implements OnModuleInit {
     return this.jobs.get(jobId) || null;
   }
 
-  private runScriptOnNode(node: SshNode, content: string, result: NodeResult): Promise<void> {
+  private runScriptOnNode(node: SshNode, content: string, result: NodeResult, mask: string[]): Promise<void> {
     return new Promise((resolve, reject) => {
       const conn = new Client();
 
@@ -358,17 +368,19 @@ export class ScriptsService implements OnModuleInit {
           : `bash -e << 'SCRIPT_EOF'\n${content}\nSCRIPT_EOF`;
         conn.exec(cmd, (err, stream) => {
           if (err) {
-            result.logs.push(`[ERROR] ${err.message}`);
+            result.logs.push(this.maskSecrets(`[ERROR] ${err.message}`, mask));
             conn.end();
             return reject(err);
           }
 
           stream.on('data', (data: Buffer) => {
-            data.toString().split('\n').filter(Boolean).forEach(l => result.logs.push(l));
+            data.toString().split('\n').filter(Boolean)
+              .forEach(l => result.logs.push(this.maskSecrets(l, mask)));
           });
 
           stream.stderr.on('data', (data: Buffer) => {
-            data.toString().split('\n').filter(Boolean).forEach(l => result.logs.push(`[stderr] ${l}`));
+            data.toString().split('\n').filter(Boolean)
+              .forEach(l => result.logs.push(this.maskSecrets(`[stderr] ${l}`, mask)));
           });
 
           stream.on('close', (code: number) => {
@@ -381,7 +393,7 @@ export class ScriptsService implements OnModuleInit {
       });
 
       conn.on('error', (err) => {
-        result.logs.push(`[SSH] Ошибка подключения: ${err.message}`);
+        result.logs.push(this.maskSecrets(`[SSH] Ошибка подключения: ${err.message}`, mask));
         reject(err);
       });
 

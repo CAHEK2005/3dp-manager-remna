@@ -2,13 +2,13 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions,
   DialogContent, DialogTitle, Divider, FormControl, FormControlLabel,
-  IconButton, InputLabel, MenuItem, Paper, Radio, RadioGroup, Select,
+  IconButton, InputLabel, Menu, MenuItem, Paper, Radio, RadioGroup, Select,
   Snackbar, Stack, Tab, Table, TableBody, TableCell, TableHead,
   TableRow, Tabs, TextField, Tooltip, Typography,
 } from '@mui/material';
 import {
   Add, Close, ContentCopy, CropSquare, Delete, Edit, FileDownload,
-  OpenInNew, PlayArrow, Remove, Terminal, UploadFile,
+  LockOpen, OpenInNew, PlayArrow, Remove, Terminal, UploadFile, VpnKey,
 } from '@mui/icons-material';
 import type { SelectChangeEvent } from '@mui/material/Select';
 import { Terminal as XTerm } from '@xterm/xterm';
@@ -86,6 +86,14 @@ interface TerminalSession {
   minimized: boolean;
   position: { x: number; y: number };
   size: { width: number; height: number };
+}
+
+interface Secret {
+  id: string;
+  name: string;
+  type: 'password' | 'ssh-key' | 'token' | 'custom';
+  description?: string;
+  createdAt: string;
 }
 
 type TerminalInstance = {
@@ -405,6 +413,14 @@ export default function ScriptsPage() {
   const logsEndRef = useRef<HTMLDivElement | null>(null);
   const keyFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // ── Secrets ───────────────────────────────────────────────────────────────
+  const [secrets, setSecrets] = useState<Secret[]>([]);
+  const [secretDialog, setSecretDialog] = useState(false);
+  const [secretEditId, setSecretEditId] = useState<string | null>(null);
+  const [secretForm, setSecretForm] = useState({ name: '', type: 'password', value: '', description: '' });
+  // For RunDialog — menu anchor for secret picker per variable
+  const [secretMenuAnchor, setSecretMenuAnchor] = useState<{ el: HTMLElement; varName: string } | null>(null);
+
   // ── Terminals ─────────────────────────────────────────────────────────────
   const [terminals, setTerminals] = useState<TerminalSession[]>([]);
   const termInstancesRef = useRef<Map<string, TerminalInstance>>(new Map());
@@ -432,10 +448,18 @@ export default function ScriptsPage() {
     } catch { setRwNodes([]); }
   }, []);
 
+  const loadSecrets = useCallback(async () => {
+    try {
+      const { data } = await api.get('/secrets');
+      setSecrets(Array.isArray(data) ? data : []);
+    } catch { setSecrets([]); }
+  }, []);
+
   useEffect(() => {
     loadSshNodes();
     loadScripts();
     loadRwNodes();
+    loadSecrets();
   }, []);
 
   // ─── SSH Node handlers ────────────────────────────────────────────────────
@@ -646,6 +670,65 @@ export default function ScriptsPage() {
     setVarValues({});
   };
 
+  // ─── Secrets handlers ────────────────────────────────────────────────────
+
+  const openAddSecret = () => {
+    setSecretEditId(null);
+    setSecretForm({ name: '', type: 'password', value: '', description: '' });
+    setSecretDialog(true);
+  };
+
+  const openEditSecret = (s: Secret) => {
+    setSecretEditId(s.id);
+    setSecretForm({ name: s.name, type: s.type, value: '', description: s.description || '' });
+    setSecretDialog(true);
+  };
+
+  const handleSaveSecret = async () => {
+    if (!secretForm.name.trim()) {
+      showMsg('error', 'Название обязательно');
+      return;
+    }
+    if (!secretEditId && !secretForm.value.trim()) {
+      showMsg('error', 'Значение обязательно');
+      return;
+    }
+    try {
+      const payload: any = { name: secretForm.name, type: secretForm.type, description: secretForm.description };
+      if (secretForm.value.trim()) payload.value = secretForm.value;
+      await api[secretEditId ? 'patch' : 'post'](
+        secretEditId ? `/secrets/${secretEditId}` : '/secrets',
+        payload,
+      );
+      showMsg('success', secretEditId ? 'Секрет обновлён' : 'Секрет создан');
+      setSecretDialog(false);
+      loadSecrets();
+    } catch (e: any) {
+      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    }
+  };
+
+  const handleDeleteSecret = async (id: string) => {
+    try {
+      await api.delete(`/secrets/${id}`);
+      loadSecrets();
+    } catch (e: any) {
+      showMsg('error', e?.response?.data?.message || 'Ошибка удаления');
+    }
+  };
+
+  const handlePickSecret = async (secretId: string) => {
+    const varName = secretMenuAnchor?.varName;
+    setSecretMenuAnchor(null);
+    if (!varName) return;
+    try {
+      const { data } = await api.get(`/secrets/${secretId}/value`);
+      setVarValues(prev => ({ ...prev, [varName]: data.value }));
+    } catch (e: any) {
+      showMsg('error', 'Не удалось получить значение секрета');
+    }
+  };
+
   // ─── Terminal handlers ────────────────────────────────────────────────────
 
   const openTerminal = useCallback((node: SshNode) => {
@@ -699,6 +782,7 @@ export default function ScriptsPage() {
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tab label="Ноды" />
           <Tab label="Скрипты" />
+          <Tab label="Секреты" />
         </Tabs>
 
         <Box sx={{ p: 3 }}>
@@ -887,6 +971,76 @@ export default function ScriptsPage() {
               </Stack>
             </Box>
           )}
+
+          {/* ── Tab 2: Secrets ── */}
+          {tab === 2 && (
+            <Box>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                <Typography variant="h6">Секреты</Typography>
+                <Button variant="contained" startIcon={<Add />} size="small" onClick={openAddSecret}>
+                  Добавить
+                </Button>
+              </Stack>
+              <Divider sx={{ mb: 2 }} />
+
+              {secrets.length === 0 ? (
+                <Alert severity="info">
+                  Нет сохранённых секретов. Добавьте SSH-ключи, пароли или токены, чтобы использовать их как переменные при запуске скриптов.
+                </Alert>
+              ) : (
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Название</TableCell>
+                      <TableCell>Тип</TableCell>
+                      <TableCell>Описание</TableCell>
+                      <TableCell>Создан</TableCell>
+                      <TableCell align="right">Действия</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {secrets.map(s => (
+                      <TableRow key={s.id} hover>
+                        <TableCell>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <VpnKey fontSize="small" color="action" />
+                            <Typography variant="body2">{s.name}</Typography>
+                          </Stack>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={s.type === 'ssh-key' ? 'SSH-ключ' : s.type === 'password' ? 'Пароль' : s.type === 'token' ? 'Токен' : 'Другое'}
+                            size="small"
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption" color="textSecondary">{s.description || '—'}</Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption" color="textSecondary">
+                            {new Date(s.createdAt).toLocaleDateString()}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Tooltip title="Изменить">
+                            <IconButton size="small" onClick={() => openEditSecret(s)}>
+                              <Edit fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Удалить">
+                            <IconButton size="small" color="error" onClick={() => handleDeleteSecret(s.id)}>
+                              <Delete fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </Box>
+          )}
         </Box>
       </Paper>
 
@@ -1068,6 +1222,59 @@ export default function ScriptsPage() {
         </DialogActions>
       </Dialog>
 
+      {/* ── Secrets Dialog ── */}
+      <Dialog open={secretDialog} onClose={() => setSecretDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>{secretEditId ? 'Изменить секрет' : 'Новый секрет'}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Название"
+              size="small"
+              fullWidth
+              value={secretForm.name}
+              onChange={e => setSecretForm(p => ({ ...p, name: e.target.value }))}
+              placeholder="Например: SSH-ключ для node-01"
+            />
+            <FormControl size="small" fullWidth>
+              <InputLabel>Тип</InputLabel>
+              <Select
+                value={secretForm.type}
+                label="Тип"
+                onChange={e => setSecretForm(p => ({ ...p, type: e.target.value }))}
+              >
+                <MenuItem value="password">Пароль</MenuItem>
+                <MenuItem value="ssh-key">SSH-ключ</MenuItem>
+                <MenuItem value="token">Токен / API-ключ</MenuItem>
+                <MenuItem value="custom">Другое</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
+              label={secretEditId ? 'Новое значение (оставьте пустым, чтобы не менять)' : 'Значение'}
+              size="small"
+              fullWidth
+              multiline={secretForm.type === 'ssh-key'}
+              rows={secretForm.type === 'ssh-key' ? 6 : 1}
+              type={secretForm.type !== 'ssh-key' ? 'password' : undefined}
+              value={secretForm.value}
+              onChange={e => setSecretForm(p => ({ ...p, value: e.target.value }))}
+              placeholder={secretForm.type === 'ssh-key' ? '-----BEGIN OPENSSH PRIVATE KEY-----' : undefined}
+              slotProps={secretForm.type === 'ssh-key' ? { input: { style: { fontFamily: 'monospace', fontSize: '0.75rem' } } } : undefined}
+            />
+            <TextField
+              label="Описание (необязательно)"
+              size="small"
+              fullWidth
+              value={secretForm.description}
+              onChange={e => setSecretForm(p => ({ ...p, description: e.target.value }))}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSecretDialog(false)}>Отмена</Button>
+          <Button variant="contained" onClick={handleSaveSecret}>Сохранить</Button>
+        </DialogActions>
+      </Dialog>
+
       {/* ── Run Dialog ── */}
       <Dialog open={runDialog} onClose={handleCloseRunDialog} maxWidth="md" fullWidth>
         <DialogTitle>Запуск: {runScript?.name}</DialogTitle>
@@ -1089,7 +1296,20 @@ export default function ScriptsPage() {
                         value={varValues[v.name] ?? ''}
                         onChange={e => setVarValues(prev => ({ ...prev, [v.name]: e.target.value }))}
                         slotProps={{
-                          input: { style: { fontFamily: 'monospace', fontSize: '0.85rem' } },
+                          input: {
+                            style: { fontFamily: 'monospace', fontSize: '0.85rem' },
+                            endAdornment: secrets.length > 0 ? (
+                              <Tooltip title="Вставить из секретов">
+                                <IconButton
+                                  size="small"
+                                  edge="end"
+                                  onClick={e => setSecretMenuAnchor({ el: e.currentTarget, varName: v.name })}
+                                >
+                                  <LockOpen fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            ) : undefined,
+                          },
                         }}
                       />
                     ))}
@@ -1097,6 +1317,27 @@ export default function ScriptsPage() {
                   <Divider sx={{ mt: 2 }} />
                 </Box>
               )}
+              {/* Secret picker menu */}
+              <Menu
+                anchorEl={secretMenuAnchor?.el}
+                open={Boolean(secretMenuAnchor)}
+                onClose={() => setSecretMenuAnchor(null)}
+              >
+                {secrets.map(s => (
+                  <MenuItem key={s.id} onClick={() => handlePickSecret(s.id)}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <VpnKey fontSize="small" color="action" />
+                      <Box>
+                        <Typography variant="body2">{s.name}</Typography>
+                        <Typography variant="caption" color="textSecondary">
+                          {s.type === 'ssh-key' ? 'SSH-ключ' : s.type === 'password' ? 'Пароль' : s.type === 'token' ? 'Токен' : 'Другое'}
+                          {s.description ? ` — ${s.description}` : ''}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  </MenuItem>
+                ))}
+              </Menu>
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                 Выберите ноды для запуска:
               </Typography>
