@@ -120,16 +120,43 @@ sysctl -p /etc/sysctl.d/99-vpn.conf`,
     isBuiltIn: true,
     content: `PUBLIC_KEY="{{ ssh_public_key | Публичный SSH-ключ (ssh-ed25519 AAAA... или ssh-rsa AAAA...) }}"
 
+# ── Добавить ключ в authorized_keys ──────────────────────────────────────────
 mkdir -p ~/.ssh
 chmod 700 ~/.ssh
 grep -qxF "$PUBLIC_KEY" ~/.ssh/authorized_keys 2>/dev/null || echo "$PUBLIC_KEY" >> ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
 
+# ── Применить настройки SSH ───────────────────────────────────────────────────
+# На Ubuntu 22.04+ Include sshd_config.d/*.conf стоит в начале sshd_config,
+# и OpenSSH берёт ПЕРВОЕ вхождение ключа. Поэтому файлы из drop-in директории
+# (например cloud-init) могут перекрывать основной конфиг.
+# Решение: пишем наш файл с префиксом 00 — он обрабатывается первым.
+
+if [ -d /etc/ssh/sshd_config.d ]; then
+  cat > /etc/ssh/sshd_config.d/00-rwm-auth.conf << 'SSHCONF_EOF'
+# Managed by RWManager — do not edit manually
+PubkeyAuthentication yes
+PasswordAuthentication no
+SSHCONF_EOF
+  chmod 600 /etc/ssh/sshd_config.d/00-rwm-auth.conf
+
+  # Закомментировать конфликтующие строки в остальных drop-in файлах
+  for f in /etc/ssh/sshd_config.d/*.conf; do
+    [ "$f" = "/etc/ssh/sshd_config.d/00-rwm-auth.conf" ] && continue
+    [ -f "$f" ] || continue
+    sed -i 's/^[[:space:]]*PubkeyAuthentication[[:space:]].*$/# &/' "$f"
+    sed -i 's/^[[:space:]]*PasswordAuthentication[[:space:]].*$/# &/' "$f"
+  done
+fi
+
+# Обновить основной sshd_config (для систем без drop-in директории)
 sed -i 's/^#*[[:space:]]*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
 sed -i 's/^#*[[:space:]]*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 grep -q '^PubkeyAuthentication' /etc/ssh/sshd_config   || echo 'PubkeyAuthentication yes'  >> /etc/ssh/sshd_config
 grep -q '^PasswordAuthentication' /etc/ssh/sshd_config || echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config
 
+# Проверить конфиг перед перезапуском — защита от самоблокировки
+sshd -t || { echo "[ERROR] Конфигурация SSH невалидна, перезапуск отменён"; exit 1; }
 systemctl restart sshd 2>/dev/null || service ssh restart
 echo "Готово: ключ добавлен, вход по паролю отключён"`,
   },
