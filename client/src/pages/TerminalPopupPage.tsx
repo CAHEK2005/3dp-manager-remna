@@ -8,9 +8,8 @@ export default function TerminalPopupPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const nodeId = params.get('nodeId') ?? '';
-    const nodeName = params.get('nodeName') ?? nodeId;
-    const token = localStorage.getItem('token') ?? '';
+    const ticket = params.get('ticket') ?? '';
+    const nodeName = params.get('nodeName') ?? 'Терминал';
 
     document.title = `Терминал — ${nodeName}`;
 
@@ -29,14 +28,10 @@ export default function TerminalPopupPage() {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsUrl = `${protocol}://${window.location.host}/api/terminal?nodeId=${encodeURIComponent(nodeId)}&token=${encodeURIComponent(token)}&cols=${term.cols}&rows=${term.rows}`;
+    const wsUrl = `${protocol}://${window.location.host}/api/terminal?ticket=${encodeURIComponent(ticket)}&cols=${term.cols}&rows=${term.rows}`;
 
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
-
-    ws.onopen = () => {
-      term.writeln('\x1b[32mПодключение установлено\x1b[0m');
-    };
 
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) {
@@ -58,6 +53,17 @@ export default function TerminalPopupPage() {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
     });
 
+    // WS heartbeat — keeps nginx proxy connection alive
+    const heartbeat = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, 25_000);
+
+    // Explicit close when user closes the popup tab/window
+    const handleUnload = () => ws.close();
+    window.addEventListener('beforeunload', handleUnload);
+
     const observer = new ResizeObserver(() => {
       fitAddon.fit();
       if (ws.readyState === WebSocket.OPEN) {
@@ -67,6 +73,8 @@ export default function TerminalPopupPage() {
     if (containerRef.current) observer.observe(containerRef.current);
 
     return () => {
+      clearInterval(heartbeat);
+      window.removeEventListener('beforeunload', handleUnload);
       observer.disconnect();
       ws.close();
       term.dispose();

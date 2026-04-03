@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ScriptsModule } from '../scripts/scripts.module';
 import { TerminalService } from './terminal.service';
+import { TerminalController } from './terminal.controller';
 
 @Module({
   imports: [
@@ -9,5 +10,6 @@ import { TerminalService } from './terminal.service';
     JwtModule.register({ secret: 'SECRET_KEY_CHANGE_ME' }),
   ],
   providers: [TerminalService],
+  controllers: [TerminalController],
 })
 export class TerminalModule {}

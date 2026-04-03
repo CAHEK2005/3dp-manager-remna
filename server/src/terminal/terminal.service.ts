@@ -5,11 +5,13 @@ import { ScriptsService } from '../scripts/scripts.service';
 import * as WebSocket from 'ws';
 import { Client } from 'ssh2';
 import * as http from 'http';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class TerminalService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TerminalService.name);
   private wss: WebSocket.Server;
+  private readonly tickets = new Map<string, { nodeId: string; expiresAt: number }>();
 
   constructor(
     private httpAdapterHost: HttpAdapterHost,
@@ -28,27 +30,52 @@ export class TerminalService implements OnModuleInit, OnModuleDestroy {
     this.wss?.close();
   }
 
+  // ── Ticket API ────────────────────────────────────────────────────────────────
+
+  createTicket(nodeId: string): string {
+    const ticket = uuidv4();
+    this.tickets.set(ticket, { nodeId, expiresAt: Date.now() + 60_000 });
+    return ticket;
+  }
+
+  // ── WebSocket handler ─────────────────────────────────────────────────────────
+
   private async handleConnection(ws: WebSocket.WebSocket, req: http.IncomingMessage) {
     const params = new URL(req.url!, 'http://x').searchParams;
-    const token = params.get('token') ?? '';
-    const nodeId = params.get('nodeId') ?? '';
     const cols = parseInt(params.get('cols') ?? '80', 10);
     const rows = parseInt(params.get('rows') ?? '24', 10);
 
-    // Verify JWT
-    try {
-      this.jwtService.verify(token);
-    } catch {
-      this.logger.warn(`Terminal: invalid token for nodeId=${nodeId}`);
-      ws.close(1008, 'Unauthorized');
-      return;
+    // Auth: ticket (popup) or JWT+nodeId (floating window)
+    let resolvedNodeId: string;
+    const ticket = params.get('ticket');
+
+    if (ticket) {
+      const entry = this.tickets.get(ticket);
+      if (!entry || Date.now() > entry.expiresAt) {
+        this.logger.warn(`Terminal: invalid or expired ticket`);
+        ws.close(1008, 'Invalid or expired ticket');
+        return;
+      }
+      resolvedNodeId = entry.nodeId;
+      this.tickets.delete(ticket); // one-time use
+    } else {
+      const token = params.get('token') ?? '';
+      const nodeId = params.get('nodeId') ?? '';
+      try {
+        this.jwtService.verify(token);
+      } catch {
+        this.logger.warn(`Terminal: invalid token for nodeId=${nodeId}`);
+        ws.close(1008, 'Unauthorized');
+        return;
+      }
+      resolvedNodeId = nodeId;
     }
 
     // Find node
     const nodes = await this.scriptsService.getSshNodes();
-    const node = nodes.find(n => n.id === nodeId);
+    const node = nodes.find(n => n.id === resolvedNodeId);
     if (!node) {
-      this.logger.warn(`Terminal: node not found: ${nodeId}`);
+      this.logger.warn(`Terminal: node not found: ${resolvedNodeId}`);
       ws.close(1008, 'Node not found');
       return;
     }
@@ -68,25 +95,21 @@ export class TerminalService implements OnModuleInit, OnModuleDestroy {
 
         // SSH data → WebSocket
         stream.on('data', (data: Buffer) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(data);
-          }
+          if (ws.readyState === WebSocket.OPEN) ws.send(data);
         });
 
         stream.stderr.on('data', (data: Buffer) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(data);
-          }
+          if (ws.readyState === WebSocket.OPEN) ws.send(data);
         });
 
         // WebSocket data → SSH
         ws.on('message', (msg: Buffer | string) => {
           const text = msg.toString();
-          // Check for resize event
           if (text.startsWith('{')) {
             try {
               const parsed = JSON.parse(text);
-              if (parsed.type === 'resize' && parsed.cols && parsed.rows) {
+              if (parsed.type === 'ping') return;                            // heartbeat — ignore
+              if (parsed.type === 'resize' && parsed.cols && parsed.rows) { // PTY resize
                 (stream as any).setWindow(parsed.rows, parsed.cols, 0, 0);
                 return;
               }
@@ -102,15 +125,8 @@ export class TerminalService implements OnModuleInit, OnModuleDestroy {
           if (ws.readyState === WebSocket.OPEN) ws.close();
         });
 
-        ws.on('close', () => {
-          stream.end();
-          conn.end();
-        });
-
-        ws.on('error', () => {
-          stream.end();
-          conn.end();
-        });
+        ws.on('close', () => { stream.end(); conn.end(); });
+        ws.on('error', () => { stream.end(); conn.end(); });
       });
     });
 
@@ -127,6 +143,8 @@ export class TerminalService implements OnModuleInit, OnModuleDestroy {
       port: node.sshPort || 22,
       username: node.sshUser || 'root',
       readyTimeout: 30000,
+      keepaliveInterval: 30000,  // SSH keepalive — prevents idle disconnect
+      keepaliveCountMax: 3,
     };
     if (node.authType === 'key' && node.sshKey) {
       connectOptions.privateKey = node.sshKey;

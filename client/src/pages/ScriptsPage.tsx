@@ -7,7 +7,7 @@ import {
   TableRow, Tabs, TextField, Tooltip, Typography,
 } from '@mui/material';
 import {
-  Add, Close, ContentCopy, Delete, Edit, FileDownload, Fullscreen,
+  Add, Close, ContentCopy, CropSquare, Delete, Edit, FileDownload,
   OpenInNew, PlayArrow, Remove, Terminal, UploadFile,
 } from '@mui/icons-material';
 import type { SelectChangeEvent } from '@mui/material/Select';
@@ -167,6 +167,11 @@ function TerminalWindow({
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
     });
 
+    // WS heartbeat — keeps nginx proxy connection alive
+    const heartbeat = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
+    }, 25_000);
+
     const observer = new ResizeObserver(() => {
       if (!container.clientHeight) return;
       fitAddon.fit();
@@ -180,6 +185,7 @@ function TerminalWindow({
 
     return () => {
       clearTimeout(initTimer);
+      clearInterval(heartbeat);
       observer.disconnect();
       ws.close();
       term.dispose();
@@ -240,10 +246,16 @@ function TerminalWindow({
     e.stopPropagation();
   };
 
-  const handlePopup = () => {
-    const params = new URLSearchParams({ nodeId: session.nodeId, nodeName: session.nodeName });
-    window.open(`/terminal-popup?${params.toString()}`, '_blank', 'width=800,height=500,noopener');
-    onClose(session.id);
+  const handlePopup = async () => {
+    const popup = window.open('about:blank', '_blank', 'width=900,height=600,noopener');
+    try {
+      const { data } = await api.post('/terminal/ticket', { nodeId: session.nodeId });
+      const params = new URLSearchParams({ ticket: data.ticket, nodeName: session.nodeName });
+      if (popup) popup.location.href = `/terminal-popup?${params.toString()}`;
+      onClose(session.id);
+    } catch {
+      popup?.close();
+    }
   };
 
   const bodyHeight = session.size.height - TERM_HEADER_H;
@@ -289,7 +301,7 @@ function TerminalWindow({
         </Tooltip>
         <Tooltip title={session.minimized ? 'Развернуть' : 'Свернуть'}>
           <IconButton size="small" onClick={() => onMinimizeToggle(session.id)} sx={{ color: '#9e9e9e', p: 0.3 }}>
-            {session.minimized ? <Fullscreen sx={{ fontSize: 15 }} /> : <Remove sx={{ fontSize: 15 }} />}
+            {session.minimized ? <CropSquare sx={{ fontSize: 15 }} /> : <Remove sx={{ fontSize: 15 }} />}
           </IconButton>
         </Tooltip>
         <Tooltip title="Закрыть">
@@ -647,9 +659,15 @@ export default function ScriptsPage() {
     }]);
   }, []);
 
-  const openTerminalPopup = useCallback((node: SshNode) => {
-    const params = new URLSearchParams({ nodeId: node.id, nodeName: node.name });
-    window.open(`/terminal-popup?${params.toString()}`, '_blank', 'width=900,height=600,noopener');
+  const openTerminalPopup = useCallback(async (node: SshNode) => {
+    const popup = window.open('about:blank', '_blank', 'width=900,height=600,noopener');
+    try {
+      const { data } = await api.post('/terminal/ticket', { nodeId: node.id });
+      const params = new URLSearchParams({ ticket: data.ticket, nodeName: node.name });
+      if (popup) popup.location.href = `/terminal-popup?${params.toString()}`;
+    } catch {
+      popup?.close();
+    }
   }, []);
 
   const closeTerminal = useCallback((id: string) => {
