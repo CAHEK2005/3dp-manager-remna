@@ -31,6 +31,24 @@ log "Восстановление конфигурации..."
 cp docker-compose.yml.bak docker-compose.yml
 cp client/nginx-client.conf.bak client/nginx-client.conf 2>/dev/null || true
 
+#################################
+# МИГРАЦИЯ: новые переменные
+#################################
+
+# SECRET_ENCRYPTION_KEY — добавляем в server/.env если отсутствует
+if ! grep -q "^SECRET_ENCRYPTION_KEY=" server/.env 2>/dev/null; then
+    SECRET_ENC_KEY=$(openssl rand -hex 32)
+    echo "SECRET_ENCRYPTION_KEY=${SECRET_ENC_KEY}" >> server/.env
+    log "Сгенерирован SECRET_ENCRYPTION_KEY → server/.env"
+fi
+
+# SECRET_ENCRYPTION_KEY — добавляем в docker-compose.yml если отсутствует
+if ! grep -q "SECRET_ENCRYPTION_KEY" docker-compose.yml; then
+    SECRET_ENC_KEY=$(grep "^SECRET_ENCRYPTION_KEY=" server/.env | cut -d'=' -f2-)
+    sed -i "s/      PORT: 3000/      SECRET_ENCRYPTION_KEY: ${SECRET_ENC_KEY}\n      PORT: 3000/" docker-compose.yml
+    log "SECRET_ENCRYPTION_KEY добавлен в docker-compose.yml"
+fi
+
 log "Остановка контейнеров..."
 docker compose down --remove-orphans
 
