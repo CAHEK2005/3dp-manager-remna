@@ -6,7 +6,7 @@ import {
   Snackbar, Stack, Tab, Table, TableBody, TableCell, TableHead,
   TableRow, Tabs, TextField, Tooltip, Typography,
 } from '@mui/material';
-import { Add, Delete, Edit, PlayArrow, Terminal, UploadFile } from '@mui/icons-material';
+import { Add, Delete, Edit, FileDownload, PlayArrow, Terminal, UploadFile } from '@mui/icons-material';
 import type { SelectChangeEvent } from '@mui/material/Select';
 import api from '../api';
 
@@ -89,6 +89,8 @@ export default function ScriptsPage() {
   const [scriptDialog, setScriptDialog] = useState(false);
   const [scriptForm, setScriptForm] = useState<Partial<Script>>({ name: '', description: '', content: '' });
   const [scriptEditId, setScriptEditId] = useState<string | null>(null);
+  const [urlInput, setUrlInput] = useState('');
+  const [urlLoading, setUrlLoading] = useState(false);
 
   // ── Run dialog ─────────────────────────────────────────────────────────────
   const [runDialog, setRunDialog] = useState(false);
@@ -191,13 +193,31 @@ export default function ScriptsPage() {
   const openAddScript = () => {
     setScriptEditId(null);
     setScriptForm({ name: '', description: '', content: '' });
+    setUrlInput('');
+    setUrlLoading(false);
     setScriptDialog(true);
   };
 
   const openEditScript = (s: Script) => {
     setScriptEditId(s.id);
     setScriptForm({ name: s.name, description: s.description || '', content: s.content });
+    setUrlInput('');
+    setUrlLoading(false);
     setScriptDialog(true);
+  };
+
+  const handleLoadFromUrl = async () => {
+    if (!urlInput.trim()) return;
+    setUrlLoading(true);
+    try {
+      const { data } = await api.post('/scripts/fetch-url', { url: urlInput });
+      setScriptForm(p => ({ ...p, content: data.content }));
+      setUrlInput('');
+    } catch (e: any) {
+      showMsg('error', e?.response?.data?.message || 'Ошибка загрузки');
+    } finally {
+      setUrlLoading(false);
+    }
   };
 
   const handleSaveScript = async () => {
@@ -619,6 +639,27 @@ export default function ScriptsPage() {
               value={scriptForm.description || ''}
               onChange={e => setScriptForm(p => ({ ...p, description: e.target.value }))}
             />
+            <Stack direction="row" spacing={1} alignItems="flex-start">
+              <TextField
+                label="Загрузить из URL"
+                size="small"
+                placeholder="https://example.com/script.sh"
+                value={urlInput}
+                onChange={e => setUrlInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleLoadFromUrl()}
+                sx={{ flex: 1 }}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleLoadFromUrl}
+                disabled={urlLoading || !urlInput.trim()}
+                startIcon={urlLoading ? <CircularProgress size={14} /> : <FileDownload />}
+                sx={{ height: 40, flexShrink: 0 }}
+              >
+                Загрузить
+              </Button>
+            </Stack>
             <TextField
               label="Bash-скрипт"
               size="small"

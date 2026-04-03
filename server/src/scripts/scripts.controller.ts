@@ -78,6 +78,28 @@ export class ScriptsController {
     }
   }
 
+  // ── Fetch URL ────────────────────────────────────────────────────────────────
+
+  @Post('fetch-url')
+  async fetchUrl(@Body() body: { url: string }) {
+    if (!body.url) throw new HttpException('URL обязателен', HttpStatus.BAD_REQUEST);
+
+    let url = body.url.trim();
+    const ghMatch = url.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/blob\/(.+)$/);
+    if (ghMatch) {
+      url = `https://raw.githubusercontent.com/${ghMatch[1]}/${ghMatch[2]}`;
+    }
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const content = await res.text();
+      return { content, resolvedUrl: url };
+    } catch (e) {
+      throw new HttpException(`Не удалось загрузить: ${e.message}`, HttpStatus.BAD_REQUEST);
+    }
+  }
+
   // ── Execute ──────────────────────────────────────────────────────────────────
 
   @Post('execute')
