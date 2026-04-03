@@ -122,6 +122,7 @@ DB_PASS=$(openssl rand -base64 12)
 JWT_SECRET=$(openssl rand -base64 32)
 ADMIN_USER=$(openssl rand -base64 8 | tr -dc 'a-zA-Z0-9' | cut -c1-10)
 ADMIN_PASS=$(openssl rand -base64 12)
+SECRET_ENC_KEY=$(openssl rand -hex 32)
 log "Секретные ключи сгенерированы."
 
 #################################
@@ -136,6 +137,7 @@ DB_NAME=rw_manager
 JWT_SECRET=${JWT_SECRET}
 ADMIN_LOGIN=${ADMIN_USER}
 ADMIN_PASSWORD=${ADMIN_PASS}
+SECRET_ENCRYPTION_KEY=${SECRET_ENC_KEY}
 EOF
 
 #################################
@@ -200,6 +202,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_LOGIN: ${ADMIN_USER}
       ADMIN_PASSWORD: ${ADMIN_PASS}
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENC_KEY}
       PORT: 3000
     networks:
       - app-network
