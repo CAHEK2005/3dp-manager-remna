@@ -104,7 +104,7 @@ sysctl -p /etc/sysctl.d/99-vpn.conf`,
     name: 'Перезапуск ноды',
     description: 'Перезапускает Docker-контейнер Remnawave Node',
     isBuiltIn: true,
-    content: `cd /opt/remnanode && docker compose restart`,
+    content: `cd /opt/remnanode && docker compose up -d --force-recreate`,
   },
   {
     id: 'builtin-status-node',
