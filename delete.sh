@@ -57,27 +57,6 @@ if command -v docker &>/dev/null; then
         || warn "Образы уже удалены или не найдены"
 fi
 
-# ─── UFW ──────────────────────────────────────────────────────────────────────
-
-step "Очистка правил UFW"
-if LC_ALL=C ufw status 2>/dev/null | grep -q "Status: active"; then
-    # Определить порт из .env или docker-compose.yml перед удалением директории
-    APP_PORT=""
-    if [[ -f "$PROJECT_DIR/.env" ]]; then
-        APP_PORT=$(grep -oP '(?<=^PORT=)[0-9]+' "$PROJECT_DIR/.env" 2>/dev/null | head -1 || true)
-    fi
-    if [[ -z "$APP_PORT" && -f "$PROJECT_DIR/docker-compose.yml" ]]; then
-        APP_PORT=$(grep -oP '(?<=- ")[0-9]+(?=:80")' "$PROJECT_DIR/docker-compose.yml" 2>/dev/null \
-            || grep -oP '(?<=- )[0-9]+(?=:80)' "$PROJECT_DIR/docker-compose.yml" 2>/dev/null \
-            || echo "")
-    fi
-    if [[ -n "$APP_PORT" && "$APP_PORT" != "80" ]]; then
-        ufw delete allow "${APP_PORT}/tcp" 2>/dev/null \
-            && log "Удалено правило UFW для порта ${APP_PORT}/tcp" \
-            || warn "Правило UFW для порта ${APP_PORT} не найдено"
-    fi
-fi
-
 # ─── Удаление директории ──────────────────────────────────────────────────────
 
 step "Удаление файлов"

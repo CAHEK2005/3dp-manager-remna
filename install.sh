@@ -146,14 +146,6 @@ docker compose down --remove-orphans 2>/dev/null || true
 docker compose up --build -d --remove-orphans
 docker image prune -f
 
-# ─── UFW ──────────────────────────────────────────────────────────────────────
-
-if LC_ALL=C ufw status 2>/dev/null | grep -q "Status: active"; then
-    step "Настройка UFW"
-    ufw allow "${FINAL_PORT}/tcp"
-    log "Открыт порт ${FINAL_PORT}/tcp"
-fi
-
 # ─── Итог ─────────────────────────────────────────────────────────────────────
 
 echo ""
