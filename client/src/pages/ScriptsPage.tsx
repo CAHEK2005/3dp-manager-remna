@@ -16,6 +16,8 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import api from '../api';
+import { useAlert } from '../hooks/useAlert';
+import { getErrorMessage } from '../utils/error';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 // ─── Variable extraction ──────────────────────────────────────────────────────
@@ -386,8 +388,7 @@ export default function ScriptsPage() {
   const [rwNodes, setRwNodes] = useState<RwNode[]>([]);
 
   // Snackbar
-  const [msg, setMsg] = useState({ open: false, type: 'success' as 'success' | 'error', text: '' });
-  const showMsg = (type: 'success' | 'error', text: string) => setMsg({ open: true, type, text });
+  const { msg, showMsg, closeMsg } = useAlert();
 
   // ── SSH Node dialog ───────────────────────────────────────────────────────
   const [nodeDialog, setNodeDialog] = useState(false);
@@ -549,8 +550,8 @@ export default function ScriptsPage() {
       showMsg('success', nodeEditId ? 'Нода обновлена' : 'Нода добавлена');
       setNodeDialog(false);
       loadSshNodes();
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -560,8 +561,8 @@ export default function ScriptsPage() {
       try {
         await api.delete(`/scripts/ssh-nodes/${id}`);
         loadSshNodes();
-      } catch (e: any) {
-        showMsg('error', e?.response?.data?.message || 'Ошибка удаления');
+      } catch (e: unknown) {
+        showMsg('error', getErrorMessage(e));
       }
     });
   };
@@ -604,8 +605,8 @@ export default function ScriptsPage() {
       await api.post('/settings', { node_categories: JSON.stringify(updated) });
       setCategories(updated);
       setCatDialog(false);
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -625,8 +626,8 @@ export default function ScriptsPage() {
           .map(n => api.patch(`/scripts/ssh-nodes/${n.id}`, n)),
         );
         await loadSshNodes();
-      } catch (e: any) {
-        showMsg('error', e?.response?.data?.message || 'Ошибка удаления');
+      } catch (e: unknown) {
+        showMsg('error', getErrorMessage(e));
       }
     });
   };
@@ -668,8 +669,8 @@ export default function ScriptsPage() {
       const { data } = await api.post('/scripts/fetch-url', { url: urlInput });
       setScriptForm(p => ({ ...p, content: data.content }));
       setUrlInput('');
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка загрузки');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     } finally {
       setUrlLoading(false);
     }
@@ -688,8 +689,8 @@ export default function ScriptsPage() {
       showMsg('success', scriptEditId ? 'Скрипт обновлён' : 'Скрипт создан');
       setScriptDialog(false);
       loadScripts();
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -699,8 +700,8 @@ export default function ScriptsPage() {
       try {
         await api.delete(`/scripts/scripts/${id}`);
         loadScripts();
-      } catch (e: any) {
-        showMsg('error', e?.response?.data?.message || 'Ошибка удаления');
+      } catch (e: unknown) {
+        showMsg('error', getErrorMessage(e));
       }
     });
   };
@@ -714,8 +715,8 @@ export default function ScriptsPage() {
       });
       showMsg('success', 'Скрипт клонирован — отредактируйте копию');
       loadScripts();
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка клонирования');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -804,8 +805,8 @@ export default function ScriptsPage() {
       }
       const { data } = await api.post('/scripts/execute', payload);
       startPolling(data.jobId);
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка запуска');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
       setRunLoading(false);
     }
   };
@@ -901,8 +902,8 @@ export default function ScriptsPage() {
       }
       const { data } = await api.post('/scripts/execute-sequence', payload);
       startPolling(data.jobId);
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка запуска');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
       setRunLoading(false);
     }
   };
@@ -956,8 +957,8 @@ export default function ScriptsPage() {
       showMsg('success', secretEditId ? 'Секрет обновлён' : 'Секрет создан');
       setSecretDialog(false);
       loadSecrets();
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -967,8 +968,8 @@ export default function ScriptsPage() {
       try {
         await api.delete(`/secrets/${id}`);
         loadSecrets();
-      } catch (e: any) {
-        showMsg('error', e?.response?.data?.message || 'Ошибка удаления');
+      } catch (e: unknown) {
+        showMsg('error', getErrorMessage(e));
       }
     });
   };
@@ -2281,10 +2282,10 @@ export default function ScriptsPage() {
       <Snackbar
         open={msg.open}
         autoHideDuration={4000}
-        onClose={() => setMsg(m => ({ ...m, open: false }))}
+        onClose={() => closeMsg()}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert severity={msg.type} onClose={() => setMsg(m => ({ ...m, open: false }))}>
+        <Alert severity={msg.type} onClose={() => closeMsg()}>
           {msg.text}
         </Alert>
       </Snackbar>

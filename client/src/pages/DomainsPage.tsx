@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Box, TextField, Button, Typography, IconButton, Paper, TablePagination,
-  Table, TableHead, TableRow, TableCell, TableBody, Stack, Tooltip,
+  Alert, Box, TextField, Button, Typography, IconButton, Paper, TablePagination,
+  Table, TableHead, TableRow, TableCell, TableBody, Stack, Snackbar, Tooltip,
 } from '@mui/material';
 import { Delete, Add, UploadFile, Language, FileDownload, Remove, DnsOutlined } from '@mui/icons-material';
 import api from '../api';
+import { useAlert } from '../hooks/useAlert';
 import UrlImportDialog from '../components/UrlImportDialog';
 import ConfirmDialog from '../components/ConfirmDialog';
 
@@ -16,6 +17,8 @@ export default function DomainsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [urlImportOpen, setUrlImportOpen] = useState(false);
+  const { msg, showMsg, closeMsg } = useAlert();
+
   const [confirmDel, setConfirmDel] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void }>
     ({ open: false, title: '', message: '', onConfirm: () => {} });
 
@@ -25,7 +28,7 @@ export default function DomainsPage() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
 
-  const loadDomains = async () => {
+  const loadDomains = useCallback(async () => {
     try {
       const { data } = await api.get(`/domains?page=${page + 1}&limit=${rowsPerPage}`);
       setDomains(data.data);
@@ -33,9 +36,9 @@ export default function DomainsPage() {
     } catch (e) {
       console.error(e);
     }
-  };
+  }, [page, rowsPerPage]);
 
-  useEffect(() => { loadDomains(); }, [page, rowsPerPage]);
+  useEffect(() => { loadDomains(); }, [loadDomains]);
 
   const handleAdd = async () => {
     if (!newDomain.trim()) return;
@@ -76,15 +79,15 @@ export default function DomainsPage() {
       const a = document.createElement('a');
       a.href = url; a.download = 'domains.txt'; a.click();
       URL.revokeObjectURL(url);
-    } catch { alert('Ошибка экспорта'); }
+    } catch { showMsg('error', 'Ошибка экспорта'); }
   };
 
   const handleUrlImport = async (importedDomains: string[]) => {
     try {
       const { data } = await api.post('/domains/upload', { domains: importedDomains });
-      alert(`Успешно добавлено доменов: ${data.count}`);
+      showMsg('success', `Успешно добавлено доменов: ${data.count}`);
       loadDomains();
-    } catch { alert('Ошибка при загрузке списка'); }
+    } catch { showMsg('error', 'Ошибка при загрузке списка'); }
   };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -96,9 +99,9 @@ export default function DomainsPage() {
       if (!text) return;
       try {
         const { data } = await api.post('/domains/upload', { domains: text.split(/\r?\n/) });
-        alert(`Успешно добавлено доменов: ${data.count}`);
+        showMsg('success', `Успешно добавлено доменов: ${data.count}`);
         loadDomains();
-      } catch { alert('Ошибка при загрузке списка'); }
+      } catch { showMsg('error', 'Ошибка при загрузке списка'); }
       finally { if (fileInputRef.current) fileInputRef.current.value = ''; }
     };
     reader.readAsText(file);
@@ -196,6 +199,10 @@ export default function DomainsPage() {
         </Box>
       </Paper>
 
+      <Snackbar open={msg.open} autoHideDuration={4000} onClose={() => closeMsg()}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity={msg.type} onClose={() => closeMsg()}>{msg.text}</Alert>
+      </Snackbar>
       <UrlImportDialog open={urlImportOpen} onClose={() => setUrlImportOpen(false)} onAdd={handleUrlImport} />
       <ConfirmDialog
         open={confirmDel.open}

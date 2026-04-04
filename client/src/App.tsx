@@ -39,8 +39,12 @@ function App() {
               <Route path="domains" element={<DomainsPage />} />
               <Route path="scripts" element={<ScriptsPage />} />
             </Route>
+            <Route path="/terminal-popup" element={
+              new URLSearchParams(window.location.search).get('ticket')
+                ? <TerminalPopupPage />
+                : <NotFoundPage />
+            } />
             <Route path="*" element={<NotFoundPage />} />
-            <Route path="/terminal-popup" element={<TerminalPopupPage />} />
           </Routes>
         </BrowserRouter>
       </ThemeProvider>

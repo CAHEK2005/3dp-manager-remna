@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
@@ -17,13 +17,30 @@ export interface Secret {
 export type SecretPublic = Omit<Secret, 'value'>;
 
 @Injectable()
-export class SecretsService {
+export class SecretsService implements OnModuleInit {
   private readonly logger = new Logger(SecretsService.name);
 
   constructor(
     @InjectRepository(Setting)
     private settingRepo: Repository<Setting>,
   ) {}
+
+  onModuleInit() {
+    const key = process.env.SECRET_ENCRYPTION_KEY;
+    if (!key) {
+      this.logger.warn(
+        'SECRET_ENCRYPTION_KEY is not set — secrets will be stored in plain text. ' +
+        'Set a 32-byte hex key (64 hex chars) for production.',
+      );
+      return;
+    }
+    if (!/^[0-9a-fA-F]{64}$/.test(key)) {
+      throw new Error(
+        'SECRET_ENCRYPTION_KEY must be a 64-character hex string (32 bytes). ' +
+        'Generate with: openssl rand -hex 32',
+      );
+    }
+  }
 
   // ── Encryption ───────────────────────────────────────────────────────────────
 

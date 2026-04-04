@@ -18,30 +18,24 @@ export class AuthService {
   ) {}
 
   async validateUser(login: string, pass: string): Promise<any> {
-    this.logger.log(`Попытка входа с логином: ${login}`);
+    this.logger.log('Login attempt received');
 
     const dbLogin = await this.settingsRepo.findOne({ where: { key: 'admin_login' } });
     const dbPass = await this.settingsRepo.findOne({ where: { key: 'admin_password' } });
 
-    if (!dbLogin) {
-      this.logger.error('Пользователь admin_login не найден в базе данных!');
+    if (!dbLogin || !dbPass) {
+      this.logger.error('Admin credentials not found in database');
       return null;
     }
 
-    if (!dbPass) {
-      this.logger.error('Пароль admin_password не найден в базе данных!');
-      return null;
-    }
+    const loginMatch = login === dbLogin.value;
+    const isMatch = loginMatch && await bcrypt.compare(pass, dbPass.value);
 
-    this.logger.log(`Пользователь найден, проверяем хеш пароля...`);
-    
-    const isMatch = await bcrypt.compare(pass, dbPass.value);
-    
     if (isMatch) {
-      this.logger.log('Пароль верный!');
+      this.logger.log('Login successful');
       return { login: dbLogin.value };
     } else {
-      this.logger.warn('Пароль неверный.');
+      this.logger.warn('Login failed: invalid credentials');
       return null;
     }
   }
@@ -80,7 +74,7 @@ export class AuthService {
       await this.settingsRepo.save(passSetting);
     }
     
-    this.logger.log(`Профиль администратора обновлен. Новый логин: ${login}`);
+    this.logger.log('Admin profile updated');
   }
 
   async seedAdmin() {

@@ -82,3 +82,11 @@ FRONTEND.md
 # Playwright temp screenshots / scripts
 pw-*.png
 pw-test.mjs
+screenshot_*.png
+redesign_*.mjs
+*-tmp.mjs
+
+# Editor swap / backup
+*.orig
+*.bak
+*~

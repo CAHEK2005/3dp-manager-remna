@@ -6,6 +6,7 @@ import {
 } from '@mui/material';
 import { LockOpen, VpnKey } from '@mui/icons-material';
 import api from '../api';
+import { useAlert } from '../hooks/useAlert';
 
 interface TabPanelProps { children?: React.ReactNode; index: number; value: number; }
 function TabPanel({ children, value, index }: TabPanelProps) {
@@ -27,13 +28,11 @@ export default function SettingsPage() {
   const [tgOnError, setTgOnError] = useState(true);
   const [tgOnSuccess, setTgOnSuccess] = useState(false);
 
-  const [msg, setMsg] = useState({ open: false, type: 'success' as 'success' | 'error', text: '' });
+  const { msg, showMsg, closeMsg } = useAlert();
 
   const [secrets, setSecrets] = useState<{ id: string; name: string; type: string }[]>([]);
   const [secretPickerOpen, setSecretPickerOpen] = useState(false);
   const [secretPickerCallback, setSecretPickerCallback] = useState<((v: string) => void) | null>(null);
-
-  const showMsg = (type: 'success' | 'error', text: string) => setMsg({ open: true, type, text });
 
   const openSecretPicker = (onPick: (v: string) => void) => {
     setSecretPickerCallback(() => onPick);
@@ -251,7 +250,7 @@ export default function SettingsPage() {
         </TabPanel>
       </Paper>
 
-      <Snackbar open={msg.open} autoHideDuration={5000} onClose={() => setMsg(m => ({ ...m, open: false }))}>
+      <Snackbar open={msg.open} autoHideDuration={5000} onClose={closeMsg}>
         <Alert severity={msg.type}>{msg.text}</Alert>
       </Snackbar>
 

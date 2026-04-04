@@ -11,9 +11,20 @@ import { JwtStrategy } from './jwt.strategy';
   imports: [
     TypeOrmModule.forFeature([Setting]),
     PassportModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'SECRET_KEY_CHANGE_ME',
-      signOptions: { expiresIn: '24h' },
+    JwtModule.registerAsync({
+      useFactory: () => {
+        const secret = process.env.JWT_SECRET;
+        if (!secret) {
+          console.warn(
+            '[AuthModule] WARNING: JWT_SECRET is not set. ' +
+            'Using an insecure default key. Set JWT_SECRET in production!',
+          );
+        }
+        return {
+          secret: secret || 'INSECURE_DEFAULT_CHANGE_ME_IN_PRODUCTION',
+          signOptions: { expiresIn: '24h' },
+        };
+      },
     }),
   ],
   providers: [AuthService, JwtStrategy],

@@ -1,6 +1,6 @@
 # RWManager
 
-![Version](https://img.shields.io/badge/version-2.1.0-blue.svg) [![License](https://img.shields.io/badge/license-GPL%20V3-blue.svg?longCache=true)](https://www.gnu.org/licenses/gpl-3.0)
+![Version](https://img.shields.io/badge/version-2.2.0-blue.svg) [![License](https://img.shields.io/badge/license-GPL%20V3-blue.svg?longCache=true)](https://www.gnu.org/licenses/gpl-3.0)
 
 Утилита для автоматической ротации инбаундов в панели [Remnawave](https://github.com/remnawave) (xray-based). Подключается к Remnawave по API-ключу, генерирует случайные инбаунды и обновляет config-профили по расписанию.
 
@@ -59,6 +59,28 @@ grep -E "ADMIN_LOGIN|ADMIN_PASSWORD" /opt/rwm-manager/server/.env
 
 ---
 
+## Переменные окружения
+
+Все обязательные переменные перечислены в `.env.example`. При ручной установке скопируйте его в `.env` и заполните значения:
+
+```bash
+cp .env.example .env
+```
+
+| Переменная | Описание |
+|---|---|
+| `POSTGRES_USER` | Пользователь PostgreSQL |
+| `POSTGRES_PASSWORD` | Пароль PostgreSQL |
+| `POSTGRES_DB` | Имя базы данных |
+| `JWT_SECRET` | Секрет для подписи JWT-токенов (мин. 32 байта, hex) |
+| `ADMIN_LOGIN` | Логин администратора при первом запуске |
+| `ADMIN_PASSWORD` | Пароль администратора при первом запуске |
+| `SECRET_ENCRYPTION_KEY` | Ключ шифрования хранилища секретов — 64 hex-символа (32 байта) |
+| `CORS_ORIGIN` | Разрешённый origin для CORS (например `https://rwm.example.com`) |
+| `PORT` | Внешний порт фронтенда (по умолчанию `80`) |
+
+---
+
 ## Шифрование секретов
 
 Ключ `SECRET_ENCRYPTION_KEY` генерируется автоматически при установке через `install.sh`.
@@ -80,6 +102,19 @@ docker compose -f /opt/rwm-manager/docker-compose.yml restart backend
 
 ---
 
+## Безопасность
+
+- **Rate limiting** — не более 5 попыток входа в минуту на `/auth/login`; глобальный лимит 60 запросов/мин
+- **CORS** — разрешён только origin из `CORS_ORIGIN`; без wildcard
+- **Валидация** — глобальный `ValidationPipe` с `whitelist: true` отбрасывает лишние поля на всех endpoint-ах
+- **Изоляция контейнеров** — backend и postgres не имеют открытых портов наружу; общаются только внутри `app-network`
+- **Non-root** — оба контейнера (`backend`, `frontend`) запускаются от непривилегированного пользователя
+- **Security headers** — nginx отдаёт `X-Frame-Options`, `X-Content-Type-Options`, `X-XSS-Protection`, `Referrer-Policy`, `Permissions-Policy`
+- **Healthchecks** — postgres и backend проверяются перед стартом зависимых сервисов
+- **Одноразовые тикеты** — SSH-терминал в popup-режиме открывается только по тикету, который действует 60 секунд и уничтожается после использования
+
+---
+
 ## Стек
 
-NestJS (backend) + React + Vite (frontend) + PostgreSQL, запускается через Docker Compose.
+NestJS (backend) + React + Vite + MUI (frontend) + PostgreSQL, запускается через Docker Compose.

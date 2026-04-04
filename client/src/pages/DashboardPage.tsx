@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert, Box, Button, Chip, CircularProgress,
-  Snackbar, Stack, Table, TableBody, TableCell,
+  Skeleton, Snackbar, Stack, Table, TableBody, TableCell,
   TableHead, TableRow, Tooltip, Typography, Paper,
 } from '@mui/material';
 import {
@@ -9,6 +9,8 @@ import {
   CheckCircle, Cancel, RadioButtonUnchecked,
 } from '@mui/icons-material';
 import api from '../api';
+import { useAlert } from '../hooks/useAlert';
+import { getErrorMessage } from '../utils/error';
 
 interface ManagedProfile {
   uuid: string;
@@ -135,11 +137,9 @@ export default function DashboardPage() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [domainsCount, setDomainsCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState({ open: false, type: 'success' as 'success' | 'error', text: '' });
+  const { msg, showMsg, closeMsg } = useAlert();
   const [rotating, setRotating] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const showMsg = (type: 'success' | 'error', text: string) => setMsg({ open: true, type, text });
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -171,8 +171,8 @@ export default function DashboardPage() {
       const { data } = await api.post('/rotation/rotate-all');
       showMsg('success', data.message || 'Ротация запущена');
       await loadAll();
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка ротации');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     } finally { setRotating(null); }
   };
 
@@ -182,8 +182,8 @@ export default function DashboardPage() {
       const { data } = await api.post(`/settings/profiles/managed/${uuid}/rotate`);
       showMsg(data.success ? 'success' : 'error', data.message);
       await loadAll();
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка ротации');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     } finally { setRotating(null); }
   };
 
@@ -289,7 +289,12 @@ export default function DashboardPage() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {profiles.map((p) => (
+                {loading && Array(3).fill(0).map((_, i) => (
+                  <TableRow key={`sk-p-${i}`}>
+                    {Array(4).fill(0).map((__, j) => <TableCell key={j}><Skeleton variant="text" /></TableCell>)}
+                  </TableRow>
+                ))}
+                {!loading && profiles.map((p) => (
                   <TableRow key={p.uuid}>
                     <TableCell>
                       <Typography sx={{ fontSize: '0.8125rem', fontWeight: 500 }}>{p.name}</Typography>
@@ -340,7 +345,7 @@ export default function DashboardPage() {
         {/* Nodes */}
         <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
           <SectionHeader title="Ноды" count={nodes.length} />
-          {nodes.length === 0 ? (
+          {!loading && nodes.length === 0 ? (
             <Box sx={{ p: 3, textAlign: 'center' }}>
               <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary' }}>Нет нод</Typography>
             </Box>
@@ -355,7 +360,12 @@ export default function DashboardPage() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {nodes.map((n) => (
+                {loading && Array(3).fill(0).map((_, i) => (
+                  <TableRow key={`sk-n-${i}`}>
+                    {Array(4).fill(0).map((__, j) => <TableCell key={j}><Skeleton variant="text" /></TableCell>)}
+                  </TableRow>
+                ))}
+                {!loading && nodes.map((n) => (
                   <TableRow key={n.uuid}>
                     <TableCell>
                       <Typography sx={{ fontSize: '0.8125rem', fontWeight: 500, lineHeight: 1.3 }}>{n.name}</Typography>
@@ -438,10 +448,10 @@ export default function DashboardPage() {
       <Snackbar
         open={msg.open}
         autoHideDuration={4000}
-        onClose={() => setMsg(m => ({ ...m, open: false }))}
+        onClose={() => closeMsg()}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert severity={msg.type} onClose={() => setMsg(m => ({ ...m, open: false }))}>
+        <Alert severity={msg.type} onClose={() => closeMsg()}>
           {msg.text}
         </Alert>
       </Snackbar>

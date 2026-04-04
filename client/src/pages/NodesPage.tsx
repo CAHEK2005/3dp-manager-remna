@@ -5,6 +5,7 @@ import {
   Button,
   Checkbox,
   CircularProgress,
+  Skeleton,
   Dialog,
   DialogActions,
   DialogContent,
@@ -300,13 +301,13 @@ export default function NodesPage() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {loading && (
-              <TableRow>
-                <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                  <CircularProgress size={24} />
-                </TableCell>
+            {loading && Array(3).fill(0).map((_, i) => (
+              <TableRow key={`sk-${i}`}>
+                {Array(6).fill(0).map((__, j) => (
+                  <TableCell key={j}><Skeleton variant="text" /></TableCell>
+                ))}
               </TableRow>
-            )}
+            ))}
             {!loading && nodes.length === 0 && (
               <TableRow>
                 <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>

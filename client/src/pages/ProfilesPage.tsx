@@ -12,6 +12,8 @@ import {
 } from '@mui/icons-material';
 import type { SelectChangeEvent } from '@mui/material/Select';
 import api from '../api';
+import { useAlert } from '../hooks/useAlert';
+import { getErrorMessage } from '../utils/error';
 import UrlImportDialog from '../components/UrlImportDialog';
 import ConfirmDialog from '../components/ConfirmDialog';
 
@@ -219,10 +221,8 @@ export default function ProfilesPage() {
   const domainFileInputRef = useRef<HTMLInputElement>(null);
 
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState({ open: false, type: 'success' as 'success' | 'error', text: '' });
+  const { msg, showMsg, closeMsg } = useAlert();
   const [cardMenuAnchor, setCardMenuAnchor] = useState<{ el: HTMLElement; uuid: string } | null>(null);
-
-  const showMsg = (type: 'success' | 'error', text: string) => setMsg({ open: true, type, text });
 
   // ── Load data ─────────────────────────────────────────────────────────────
 
@@ -235,7 +235,7 @@ export default function ProfilesPage() {
         if (!prev) return null;
         return (Array.isArray(data) ? data : []).find((p: ManagedProfile) => p.uuid === prev.uuid) || null;
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
     }
   }, []);
@@ -334,8 +334,8 @@ export default function ProfilesPage() {
       const res = await api.post('/rotation/rotate-all');
       showMsg('success', res.data?.message || 'Ротация запущена');
       await loadProfiles();
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка ротации');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -350,8 +350,8 @@ export default function ProfilesPage() {
     try {
       await api.patch(`/settings/profiles/managed/${uuid}/name`, { name: trimmed });
       updateProfileInState(uuid, { name: trimmed });
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка переименования');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
     setRenamingUuid(null);
   };
@@ -371,8 +371,8 @@ export default function ProfilesPage() {
       setProfiles(prev => prev.filter(p => p.uuid !== profileToDelete.uuid));
       if (selectedProfile?.uuid === profileToDelete.uuid) setSelectedProfile(null);
       showMsg('success', `Профиль "${profileToDelete.name}" удалён`);
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка удаления');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
     setDeleteDialogOpen(false);
     setProfileToDelete(null);
@@ -386,8 +386,8 @@ export default function ProfilesPage() {
       const { data } = await api.post('/settings/profiles/managed', { uuid: addExistingUuid, name: rwProfile.name });
       setProfiles(prev => [...prev, data]);
       showMsg('success', `Профиль "${rwProfile.name}" добавлен`);
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка добавления профиля');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
     setAddDialogOpen(false);
     setAddExistingUuid('');
@@ -403,8 +403,8 @@ export default function ProfilesPage() {
       setCreateDialogOpen(false);
       setCreateName('');
       setCreateNameError('');
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка создания профиля');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -449,8 +449,8 @@ export default function ProfilesPage() {
         excludedPorts: localExcludedPorts,
       });
       showMsg('success', 'Инбаунды сохранены');
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -483,8 +483,8 @@ export default function ProfilesPage() {
         applyToNode: localApplyToNode,
       });
       showMsg('success', 'Нода сохранена');
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -524,8 +524,8 @@ export default function ProfilesPage() {
       setLocalHostMappings(data.mappings || []);
       updateProfileInState(selectedProfile.uuid, { hostMappings: data.mappings || [], hostTemplate: localTemplate });
       showMsg('success', `Создано хостов: ${data.created}`);
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка создания хостов');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -543,8 +543,8 @@ export default function ProfilesPage() {
       await api.patch(`/settings/profiles/managed/${selectedProfile.uuid}`, { hostMappings: localHostMappings });
       updateProfileInState(selectedProfile.uuid, { hostMappings: localHostMappings });
       showMsg('success', 'Маппинг хостов сохранён');
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -570,8 +570,8 @@ export default function ProfilesPage() {
         rotationScheduleDays: localScheduleDays,
       });
       showMsg('success', 'Расписание сохранено');
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -594,8 +594,8 @@ export default function ProfilesPage() {
           lastRotationError: data.message || '',
         });
       }
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка сети');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -646,8 +646,8 @@ export default function ProfilesPage() {
       });
       updateProfileInState(selectedProfile.uuid, { profileDomains: localProfileDomains });
       showMsg('success', 'Домены SNI сохранены');
-    } catch (e: any) {
-      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    } catch (e: unknown) {
+      showMsg('error', getErrorMessage(e));
     }
   };
 
@@ -1563,7 +1563,7 @@ export default function ProfilesPage() {
         onCancel={() => setCreateCloseConfirm(false)}
       />
 
-      <Snackbar open={msg.open} autoHideDuration={5000} onClose={() => setMsg(m => ({ ...m, open: false }))}>
+      <Snackbar open={msg.open} autoHideDuration={5000} onClose={() => closeMsg()}>
         <Alert severity={msg.type}>{msg.text}</Alert>
       </Snackbar>
     </Box>

@@ -3,6 +3,7 @@ import {
   Box, Drawer, IconButton, Stack, Tooltip, Typography,
   useMediaQuery, useTheme, AppBar, Toolbar,
 } from '@mui/material';
+import ConfirmDialog from './ConfirmDialog';
 import {
   Layers, Dns, Settings, Storage, Dashboard, Terminal,
   Brightness7, Brightness4, BrightnessAuto, Logout, Menu as MenuIcon,
@@ -63,6 +64,7 @@ export default function Layout() {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
   const { mode, toggleColorMode } = useThemeContext();
   const { logout } = useAuth();
 
@@ -76,9 +78,7 @@ export default function Layout() {
     if (isMobile) setMobileOpen(false);
   };
 
-  const handleLogout = () => {
-    if (confirm('Выйти из системы?')) { logout(); navigate('/login'); }
-  };
+  const handleLogout = () => setLogoutConfirm(true);
 
   const getThemeIcon = () => {
     switch (mode) {
@@ -217,6 +217,15 @@ export default function Layout() {
       </Box>
 
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <ConfirmDialog
+        open={logoutConfirm}
+        title="Выйти из системы?"
+        message="Вы будете перенаправлены на страницу входа."
+        confirmLabel="Выйти"
+        confirmColor="primary"
+        onConfirm={() => { setLogoutConfirm(false); logout(); navigate('/login'); }}
+        onCancel={() => setLogoutConfirm(false)}
+      />
     </Box>
   );
 }
