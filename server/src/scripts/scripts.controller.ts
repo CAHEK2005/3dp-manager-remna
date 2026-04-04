@@ -103,9 +103,14 @@ export class ScriptsController {
   // ── Execute ──────────────────────────────────────────────────────────────────
 
   @Post('execute')
-  async execute(@Body() body: { scriptId: string; nodeIds: string[]; variables?: Record<string, string> }) {
+  async execute(@Body() body: {
+    scriptId: string;
+    nodeIds: string[];
+    variables?: Record<string, string>;
+    variablesPerNode?: Record<string, Record<string, string>>;
+  }) {
     try {
-      return await this.scriptsService.executeScript(body.scriptId, body.nodeIds, body.variables);
+      return await this.scriptsService.executeScript(body.scriptId, body.nodeIds, body.variables, body.variablesPerNode);
     } catch (e) {
       throw new HttpException(e.message, HttpStatus.BAD_REQUEST);
     }
@@ -116,9 +121,12 @@ export class ScriptsController {
     scriptIds: string[];
     nodeIds: string[];
     variablesPerScript: Record<string, Record<string, string>>;
+    variablesPerScriptPerNode?: Record<string, Record<string, Record<string, string>>>;
   }) {
     try {
-      return await this.scriptsService.executeSequence(body.scriptIds, body.nodeIds, body.variablesPerScript ?? {});
+      return await this.scriptsService.executeSequence(
+        body.scriptIds, body.nodeIds, body.variablesPerScript ?? {}, body.variablesPerScriptPerNode,
+      );
     } catch (e) {
       throw new HttpException(e.message, HttpStatus.BAD_REQUEST);
     }

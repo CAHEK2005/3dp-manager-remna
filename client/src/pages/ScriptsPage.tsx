@@ -3,7 +3,7 @@ import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions,
   DialogContent, DialogTitle, Divider, FormControl, FormControlLabel,
   IconButton, InputLabel, MenuItem, Paper, Radio, RadioGroup, Select,
-  Snackbar, Stack, Tab, Table, TableBody, TableCell, TableHead,
+  Snackbar, Stack, Switch, Tab, Table, TableBody, TableCell, TableHead,
   TableRow, Tabs, TextField, Tooltip, Typography,
 } from '@mui/material';
 import {
@@ -437,11 +437,18 @@ export default function ScriptsPage() {
   const [catForm, setCatForm] = useState<{ id?: string; name: string; color: string }>({ name: '', color: '#1976d2' });
   const [catEditId, setCatEditId] = useState<string | null>(null);
 
+  // ── Per-node vars (single run) ────────────────────────────────────────────
+  const [perNodeVarsMode, setPerNodeVarsMode] = useState(false);
+  const [varValuesPerNode, setVarValuesPerNode] = useState<Record<string, Record<string, string>>>({});
+
   // ── Script Queue ──────────────────────────────────────────────────────────
   const [scriptQueue, setScriptQueue] = useState<Script[]>([]);
   const [queueDialogOpen, setQueueDialogOpen] = useState(false);
   const [queueSelectedNodeIds, setQueueSelectedNodeIds] = useState<string[]>([]);
   const [varValuesPerScript, setVarValuesPerScript] = useState<Record<string, Record<string, string>>>({});
+  // ── Per-node vars (queue run) ─────────────────────────────────────────────
+  const [perNodeVarsQueueMode, setPerNodeVarsQueueMode] = useState(false);
+  const [varValuesPerScriptPerNode, setVarValuesPerScriptPerNode] = useState<Record<string, Record<string, Record<string, string>>>>({});
 
   // ── Terminals ─────────────────────────────────────────────────────────────
   const [terminals, setTerminals] = useState<TerminalSession[]>([]);
@@ -689,6 +696,8 @@ export default function ScriptsPage() {
     setRunJob(null);
     setScriptVars(vars);
     setVarValues(Object.fromEntries(vars.map(v => [v.name, ''])));
+    setPerNodeVarsMode(false);
+    setVarValuesPerNode({});
     setRunDialog(true);
   };
 
@@ -730,19 +739,38 @@ export default function ScriptsPage() {
       showMsg('error', 'Выберите хотя бы одну ноду');
       return;
     }
-    const emptyVar = scriptVars.find(v => !varValues[v.name]?.trim());
-    if (emptyVar) {
-      showMsg('error', `Заполните переменную: ${emptyVar.label}`);
-      return;
+
+    if (perNodeVarsMode) {
+      // Валидация: у каждой выбранной ноды заполнены все переменные
+      for (const nodeId of selectedNodeIds) {
+        const node = sshNodes.find(n => n.id === nodeId);
+        const emptyVar = scriptVars.find(v => !varValuesPerNode[nodeId]?.[v.name]?.trim());
+        if (emptyVar) {
+          showMsg('error', `Заполните «${emptyVar.label}» для ноды «${node?.name ?? nodeId}»`);
+          return;
+        }
+      }
+    } else {
+      const emptyVar = scriptVars.find(v => !varValues[v.name]?.trim());
+      if (emptyVar) {
+        showMsg('error', `Заполните переменную: ${emptyVar.label}`);
+        return;
+      }
     }
+
     try {
       setRunLoading(true);
       setRunJob(null);
-      const { data } = await api.post('/scripts/execute', {
+      const payload: any = {
         scriptId: runScript.id,
         nodeIds: selectedNodeIds,
-        variables: varValues,
-      });
+      };
+      if (perNodeVarsMode) {
+        payload.variablesPerNode = varValuesPerNode;
+      } else {
+        payload.variables = varValues;
+      }
+      const { data } = await api.post('/scripts/execute', payload);
       startPolling(data.jobId);
     } catch (e: any) {
       showMsg('error', e?.response?.data?.message || 'Ошибка запуска');
@@ -757,6 +785,8 @@ export default function ScriptsPage() {
     setRunLoading(false);
     setScriptVars([]);
     setVarValues({});
+    setPerNodeVarsMode(false);
+    setVarValuesPerNode({});
   };
 
   // ─── Queue handlers ───────────────────────────────────────────────────────
@@ -796,26 +826,48 @@ export default function ScriptsPage() {
     setQueueDialogOpen(false);
     setRunJob(null);
     setRunLoading(false);
+    setPerNodeVarsQueueMode(false);
+    setVarValuesPerScriptPerNode({});
   };
 
   const handleRunQueue = async () => {
     if (!queueSelectedNodeIds.length) { showMsg('error', 'Выберите хотя бы одну ноду'); return; }
-    for (const s of scriptQueue) {
-      const vars = extractVariables(s.content);
-      const emptyVar = vars.find(v => !varValuesPerScript[s.id]?.[v.name]?.trim());
-      if (emptyVar) {
-        showMsg('error', `Заполните переменную «${emptyVar.label}» для скрипта «${s.name}»`);
-        return;
+
+    if (perNodeVarsQueueMode) {
+      for (const s of scriptQueue) {
+        const vars = extractVariables(s.content);
+        for (const nodeId of queueSelectedNodeIds) {
+          const node = sshNodes.find(n => n.id === nodeId);
+          const emptyVar = vars.find(v => !varValuesPerScriptPerNode[s.id]?.[nodeId]?.[v.name]?.trim());
+          if (emptyVar) {
+            showMsg('error', `Заполните «${emptyVar.label}» для ноды «${node?.name ?? nodeId}» (скрипт «${s.name}»)`);
+            return;
+          }
+        }
+      }
+    } else {
+      for (const s of scriptQueue) {
+        const vars = extractVariables(s.content);
+        const emptyVar = vars.find(v => !varValuesPerScript[s.id]?.[v.name]?.trim());
+        if (emptyVar) {
+          showMsg('error', `Заполните переменную «${emptyVar.label}» для скрипта «${s.name}»`);
+          return;
+        }
       }
     }
+
     try {
       setRunLoading(true);
       setRunJob(null);
-      const { data } = await api.post('/scripts/execute-sequence', {
+      const payload: any = {
         scriptIds: scriptQueue.map(s => s.id),
         nodeIds: queueSelectedNodeIds,
         variablesPerScript: varValuesPerScript,
-      });
+      };
+      if (perNodeVarsQueueMode) {
+        payload.variablesPerScriptPerNode = varValuesPerScriptPerNode;
+      }
+      const { data } = await api.post('/scripts/execute-sequence', payload);
       startPolling(data.jobId);
     } catch (e: any) {
       showMsg('error', e?.response?.data?.message || 'Ошибка запуска');
@@ -1628,8 +1680,9 @@ export default function ScriptsPage() {
         <DialogContent>
           {!runJob ? (
             <Box>
-              {scriptVars.length > 0 && (
-                <Box sx={{ mb: 3 }}>
+              {/* Глобальные переменные — только когда НЕ в per-node режиме */}
+              {scriptVars.length > 0 && !perNodeVarsMode && (
+                <Box sx={{ mb: 2 }}>
                   <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
                     Переменные скрипта:
                   </Typography>
@@ -1647,11 +1700,8 @@ export default function ScriptsPage() {
                             style: { fontFamily: 'monospace', fontSize: '0.85rem' },
                             endAdornment: secrets.length > 0 ? (
                               <Tooltip title="Вставить из секретов">
-                                <IconButton
-                                  size="small"
-                                  edge="end"
-                                  onClick={() => openSecretPicker(val => setVarValues(prev => ({ ...prev, [v.name]: val })))}
-                                >
+                                <IconButton size="small" edge="end"
+                                  onClick={() => openSecretPicker(val => setVarValues(prev => ({ ...prev, [v.name]: val })))}>
                                   <LockOpen fontSize="small" />
                                 </IconButton>
                               </Tooltip>
@@ -1661,9 +1711,38 @@ export default function ScriptsPage() {
                       />
                     ))}
                   </Stack>
-                  <Divider sx={{ mt: 2 }} />
                 </Box>
               )}
+
+              {/* Toggle индивидуальных переменных */}
+              {scriptVars.length > 0 && (
+                <Stack direction="row" alignItems="center" sx={{ mb: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        size="small"
+                        checked={perNodeVarsMode}
+                        onChange={e => {
+                          const next = e.target.checked;
+                          setPerNodeVarsMode(next);
+                          if (next) {
+                            const init: Record<string, Record<string, string>> = {};
+                            for (const nodeId of selectedNodeIds) {
+                              init[nodeId] = Object.fromEntries(scriptVars.map(v => [v.name, varValues[v.name] || '']));
+                            }
+                            setVarValuesPerNode(init);
+                          } else {
+                            setVarValuesPerNode({});
+                          }
+                        }}
+                      />
+                    }
+                    label={<Typography variant="body2">Индивидуальные переменные для каждой ноды</Typography>}
+                  />
+                </Stack>
+              )}
+
+              <Divider sx={{ mb: 2 }} />
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                 Выберите ноды для запуска:
               </Typography>
@@ -1685,39 +1764,71 @@ export default function ScriptsPage() {
                   {sshNodes.map(node => {
                     const selected = selectedNodeIds.includes(node.id);
                     return (
-                      <Paper
-                        key={node.id}
-                        variant="outlined"
-                        sx={{
-                          p: 1.5,
-                          cursor: 'pointer',
-                          borderColor: selected ? 'primary.main' : undefined,
-                          bgcolor: selected ? 'action.selected' : undefined,
-                        }}
-                        onClick={() => toggleNodeSelection(node.id)}
-                      >
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Box sx={{
-                            width: 16, height: 16, borderRadius: '50%',
-                            border: '2px solid',
-                            borderColor: selected ? 'primary.main' : 'text.disabled',
-                            bgcolor: selected ? 'primary.main' : 'transparent',
-                            flexShrink: 0,
-                          }} />
-                          <Typography variant="body2" fontWeight={selected ? 600 : 400}>
-                            {node.name}
-                          </Typography>
-                          <Typography variant="caption" color="textSecondary">
-                            {node.ip}:{node.sshPort} ({node.sshUser})
-                          </Typography>
-                          <Stack direction="row" spacing={0.3}>
-                            {(node.categoryIds || []).map(cid => {
-                              const cat = categories.find(c => c.id === cid);
-                              return cat ? <Chip key={cid} label={cat.name} size="small"
-                                sx={{ bgcolor: cat.color, color: '#fff', fontSize: '0.65rem', height: 18 }} /> : null;
-                            })}
+                      <Paper key={node.id} variant="outlined"
+                        sx={{ borderColor: selected ? 'primary.main' : undefined, bgcolor: selected ? 'action.selected' : undefined }}>
+                        {/* Заголовок ноды — кликабелен для выбора */}
+                        <Box sx={{ p: 1.5, cursor: 'pointer' }}
+                          onClick={() => {
+                            if (perNodeVarsMode && !selected) {
+                              setVarValuesPerNode(prev => ({
+                                ...prev,
+                                [node.id]: prev[node.id] || Object.fromEntries(scriptVars.map(v => [v.name, varValues[v.name] || ''])),
+                              }));
+                            }
+                            toggleNodeSelection(node.id);
+                          }}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Box sx={{
+                              width: 16, height: 16, borderRadius: '50%', border: '2px solid', flexShrink: 0,
+                              borderColor: selected ? 'primary.main' : 'text.disabled',
+                              bgcolor: selected ? 'primary.main' : 'transparent',
+                            }} />
+                            <Typography variant="body2" fontWeight={selected ? 600 : 400}>{node.name}</Typography>
+                            <Typography variant="caption" color="textSecondary">{node.ip}:{node.sshPort} ({node.sshUser})</Typography>
+                            <Stack direction="row" spacing={0.3}>
+                              {(node.categoryIds || []).map(cid => {
+                                const cat = categories.find(c => c.id === cid);
+                                return cat ? <Chip key={cid} label={cat.name} size="small"
+                                  sx={{ bgcolor: cat.color, color: '#fff', fontSize: '0.65rem', height: 18 }} /> : null;
+                              })}
+                            </Stack>
                           </Stack>
-                        </Stack>
+                        </Box>
+                        {/* Поля переменных для ноды — только в per-node режиме */}
+                        {perNodeVarsMode && selected && scriptVars.length > 0 && (
+                          <Box sx={{ px: 2, pb: 1.5, pt: 0 }}>
+                            <Divider sx={{ mb: 1 }} />
+                            <Stack spacing={1}>
+                              {scriptVars.map(v => (
+                                <TextField
+                                  key={v.name}
+                                  label={v.label}
+                                  size="small"
+                                  fullWidth
+                                  value={varValuesPerNode[node.id]?.[v.name] ?? ''}
+                                  onChange={e => setVarValuesPerNode(prev => ({
+                                    ...prev,
+                                    [node.id]: { ...prev[node.id], [v.name]: e.target.value },
+                                  }))}
+                                  onClick={e => e.stopPropagation()}
+                                  slotProps={{
+                                    input: {
+                                      style: { fontFamily: 'monospace', fontSize: '0.85rem' },
+                                      endAdornment: secrets.length > 0 ? (
+                                        <Tooltip title="Вставить из секретов">
+                                          <IconButton size="small" edge="end"
+                                            onClick={e => { e.stopPropagation(); openSecretPicker(val => setVarValuesPerNode(prev => ({ ...prev, [node.id]: { ...prev[node.id], [v.name]: val } }))); }}>
+                                            <LockOpen fontSize="small" />
+                                          </IconButton>
+                                        </Tooltip>
+                                      ) : undefined,
+                                    },
+                                  }}
+                                />
+                              ))}
+                            </Stack>
+                          </Box>
+                        )}
                       </Paper>
                     );
                   })}
@@ -1857,6 +1968,40 @@ export default function ScriptsPage() {
               </Stack>
 
               <Divider sx={{ mb: 2 }} />
+
+              {/* Toggle индивидуальных переменных для очереди */}
+              {scriptQueue.some(s => extractVariables(s.content).length > 0) && (
+                <Stack direction="row" alignItems="center" sx={{ mb: 2 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        size="small"
+                        checked={perNodeVarsQueueMode}
+                        onChange={e => {
+                          const next = e.target.checked;
+                          setPerNodeVarsQueueMode(next);
+                          if (next) {
+                            const init: Record<string, Record<string, Record<string, string>>> = {};
+                            for (const s of scriptQueue) {
+                              const svars = extractVariables(s.content);
+                              if (!svars.length) continue;
+                              init[s.id] = {};
+                              for (const nodeId of queueSelectedNodeIds) {
+                                init[s.id][nodeId] = Object.fromEntries(svars.map(v => [v.name, varValuesPerScript[s.id]?.[v.name] || '']));
+                              }
+                            }
+                            setVarValuesPerScriptPerNode(init);
+                          } else {
+                            setVarValuesPerScriptPerNode({});
+                          }
+                        }}
+                      />
+                    }
+                    label={<Typography variant="body2">Индивидуальные переменные для каждой ноды</Typography>}
+                  />
+                </Stack>
+              )}
+
               <Typography variant="subtitle2" sx={{ mb: 1 }}>Выберите ноды для запуска:</Typography>
               {categories.length > 0 && (
                 <Stack direction="row" spacing={0.5} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
@@ -1875,22 +2020,85 @@ export default function ScriptsPage() {
                 <Stack spacing={1}>
                   {sshNodes.map(node => {
                     const selected = queueSelectedNodeIds.includes(node.id);
+                    const scriptsWithVars = scriptQueue.filter(s => extractVariables(s.content).length > 0);
                     return (
                       <Paper key={node.id} variant="outlined"
-                        sx={{ p: 1.5, cursor: 'pointer', borderColor: selected ? 'primary.main' : undefined, bgcolor: selected ? 'action.selected' : undefined }}
-                        onClick={() => setQueueSelectedNodeIds(prev => prev.includes(node.id) ? prev.filter(id => id !== node.id) : [...prev, node.id])}>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Box sx={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid', borderColor: selected ? 'primary.main' : 'text.disabled', bgcolor: selected ? 'primary.main' : 'transparent', flexShrink: 0 }} />
-                          <Typography variant="body2" fontWeight={selected ? 600 : 400}>{node.name}</Typography>
-                          <Typography variant="caption" color="textSecondary">{node.ip}:{node.sshPort} ({node.sshUser})</Typography>
-                          <Stack direction="row" spacing={0.3}>
-                            {(node.categoryIds || []).map(cid => {
-                              const cat = categories.find(c => c.id === cid);
-                              return cat ? <Chip key={cid} label={cat.name} size="small"
-                                sx={{ bgcolor: cat.color, color: '#fff', fontSize: '0.65rem', height: 18 }} /> : null;
-                            })}
+                        sx={{ borderColor: selected ? 'primary.main' : undefined, bgcolor: selected ? 'action.selected' : undefined }}>
+                        <Box sx={{ p: 1.5, cursor: 'pointer' }}
+                          onClick={() => {
+                            if (perNodeVarsQueueMode && !selected) {
+                              setVarValuesPerScriptPerNode(prev => {
+                                const next = { ...prev };
+                                for (const s of scriptQueue) {
+                                  const svars = extractVariables(s.content);
+                                  if (!svars.length) continue;
+                                  next[s.id] = { ...next[s.id], [node.id]: next[s.id]?.[node.id] || Object.fromEntries(svars.map(v => [v.name, varValuesPerScript[s.id]?.[v.name] || ''])) };
+                                }
+                                return next;
+                              });
+                            }
+                            setQueueSelectedNodeIds(prev => prev.includes(node.id) ? prev.filter(id => id !== node.id) : [...prev, node.id]);
+                          }}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Box sx={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid', borderColor: selected ? 'primary.main' : 'text.disabled', bgcolor: selected ? 'primary.main' : 'transparent', flexShrink: 0 }} />
+                            <Typography variant="body2" fontWeight={selected ? 600 : 400}>{node.name}</Typography>
+                            <Typography variant="caption" color="textSecondary">{node.ip}:{node.sshPort} ({node.sshUser})</Typography>
+                            <Stack direction="row" spacing={0.3}>
+                              {(node.categoryIds || []).map(cid => {
+                                const cat = categories.find(c => c.id === cid);
+                                return cat ? <Chip key={cid} label={cat.name} size="small"
+                                  sx={{ bgcolor: cat.color, color: '#fff', fontSize: '0.65rem', height: 18 }} /> : null;
+                              })}
+                            </Stack>
                           </Stack>
-                        </Stack>
+                        </Box>
+                        {/* Per-node переменные для каждого скрипта очереди */}
+                        {perNodeVarsQueueMode && selected && scriptsWithVars.length > 0 && (
+                          <Box sx={{ px: 2, pb: 1.5, pt: 0 }}>
+                            <Divider sx={{ mb: 1 }} />
+                            <Stack spacing={1.5}>
+                              {scriptsWithVars.map(s => {
+                                const svars = extractVariables(s.content);
+                                return (
+                                  <Box key={s.id}>
+                                    <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 0.5 }}>
+                                      {s.name}
+                                    </Typography>
+                                    <Stack spacing={1}>
+                                      {svars.map(v => (
+                                        <TextField
+                                          key={v.name}
+                                          label={v.label}
+                                          size="small"
+                                          fullWidth
+                                          value={varValuesPerScriptPerNode[s.id]?.[node.id]?.[v.name] ?? ''}
+                                          onChange={e => setVarValuesPerScriptPerNode(prev => ({
+                                            ...prev,
+                                            [s.id]: { ...prev[s.id], [node.id]: { ...prev[s.id]?.[node.id], [v.name]: e.target.value } },
+                                          }))}
+                                          onClick={e => e.stopPropagation()}
+                                          slotProps={{
+                                            input: {
+                                              style: { fontFamily: 'monospace', fontSize: '0.85rem' },
+                                              endAdornment: secrets.length > 0 ? (
+                                                <Tooltip title="Вставить из секретов">
+                                                  <IconButton size="small" edge="end"
+                                                    onClick={e => { e.stopPropagation(); openSecretPicker(val => setVarValuesPerScriptPerNode(prev => ({ ...prev, [s.id]: { ...prev[s.id], [node.id]: { ...prev[s.id]?.[node.id], [v.name]: val } } }))); }}>
+                                                    <LockOpen fontSize="small" />
+                                                  </IconButton>
+                                                </Tooltip>
+                                              ) : undefined,
+                                            },
+                                          }}
+                                        />
+                                      ))}
+                                    </Stack>
+                                  </Box>
+                                );
+                              })}
+                            </Stack>
+                          </Box>
+                        )}
                       </Paper>
                     );
                   })}

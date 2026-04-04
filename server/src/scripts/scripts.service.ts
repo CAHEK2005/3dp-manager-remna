@@ -304,6 +304,7 @@ export class ScriptsService implements OnModuleInit {
     scriptId: string,
     nodeIds: string[],
     variables?: Record<string, string>,
+    variablesPerNode?: Record<string, Record<string, string>>,
   ): Promise<{ jobId: string }> {
     const scripts = await this.loadScripts();
     const script = scripts.find(s => s.id === scriptId);
@@ -313,11 +314,10 @@ export class ScriptsService implements OnModuleInit {
     const targetNodes = nodes.filter(n => nodeIds.includes(n.id));
     if (!targetNodes.length) throw new Error('Не выбрано ни одной ноды');
 
-    const content = variables && Object.keys(variables).length > 0
-      ? this.substituteVariables(script.content, variables)
-      : script.content;
-
-    const sensitiveValues = Object.values(variables || {}).filter(v => v.length > 3);
+    const sensitiveValues = [
+      ...Object.values(variables || {}),
+      ...Object.values(variablesPerNode || {}).flatMap(v => Object.values(v)),
+    ].filter(v => v.length > 3);
 
     const jobId = uuidv4();
     const job: ScriptJob = {
@@ -335,6 +335,10 @@ export class ScriptsService implements OnModuleInit {
     // Запускаем параллельно на всех нодах
     const promises = targetNodes.map(async (node, idx) => {
       const result = job.results[idx];
+      const nodeVars = variablesPerNode?.[node.id] ?? variables ?? {};
+      const content = Object.keys(nodeVars).length > 0
+        ? this.substituteVariables(script.content, nodeVars)
+        : script.content;
       try {
         await this.runScriptOnNode(node, content, result, sensitiveValues);
         result.status = 'success';
@@ -360,6 +364,7 @@ export class ScriptsService implements OnModuleInit {
     scriptIds: string[],
     nodeIds: string[],
     variablesPerScript: Record<string, Record<string, string>>,
+    variablesPerScriptPerNode?: Record<string, Record<string, Record<string, string>>>,
   ): Promise<{ jobId: string }> {
     if (!scriptIds.length) throw new Error('Список скриптов пуст');
 
@@ -374,9 +379,12 @@ export class ScriptsService implements OnModuleInit {
     const targetNodes = nodes.filter(n => nodeIds.includes(n.id));
     if (!targetNodes.length) throw new Error('Не выбрано ни одной ноды');
 
-    const sensitiveValues = Object.values(variablesPerScript)
-      .flatMap(vars => Object.values(vars))
-      .filter(v => v.length > 3);
+    const sensitiveValues = [
+      ...Object.values(variablesPerScript).flatMap(vars => Object.values(vars)),
+      ...Object.values(variablesPerScriptPerNode || {})
+        .flatMap(perNode => Object.values(perNode))
+        .flatMap(vars => Object.values(vars)),
+    ].filter(v => v.length > 3);
 
     const jobId = uuidv4();
     const job: ScriptJob = {
@@ -395,7 +403,9 @@ export class ScriptsService implements OnModuleInit {
       const result = job.results[idx];
       for (let i = 0; i < resolvedScripts.length; i++) {
         const script = resolvedScripts[i];
-        const vars = variablesPerScript[script.id] ?? {};
+        const vars = variablesPerScriptPerNode?.[script.id]?.[node.id]
+          ?? variablesPerScript[script.id]
+          ?? {};
         const content = Object.keys(vars).length > 0
           ? this.substituteVariables(script.content, vars)
           : script.content;
