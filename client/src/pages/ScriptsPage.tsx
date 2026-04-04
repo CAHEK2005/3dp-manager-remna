@@ -8,6 +8,7 @@ import {
 } from '@mui/material';
 import {
   Add, Close, ContentCopy, CropSquare, Delete, Edit, FileDownload,
+  KeyboardArrowDown, KeyboardArrowUp, Label,
   LockOpen, OpenInNew, PlayArrow, Remove, Terminal, UploadFile, VpnKey,
 } from '@mui/icons-material';
 import type { SelectChangeEvent } from '@mui/material/Select';
@@ -50,6 +51,13 @@ interface SshNode {
   authType: 'password' | 'key';
   password?: string;
   sshKey?: string;
+  categoryIds?: string[];
+}
+
+interface NodeCategory {
+  id: string;
+  name: string;
+  color: string;
 }
 
 interface Script {
@@ -423,6 +431,18 @@ export default function ScriptsPage() {
   const [secretPickerOpen, setSecretPickerOpen] = useState(false);
   const [secretPickerCallback, setSecretPickerCallback] = useState<((v: string) => void) | null>(null);
 
+  // ── Categories ────────────────────────────────────────────────────────────
+  const [categories, setCategories] = useState<NodeCategory[]>([]);
+  const [catDialog, setCatDialog] = useState(false);
+  const [catForm, setCatForm] = useState<{ id?: string; name: string; color: string }>({ name: '', color: '#1976d2' });
+  const [catEditId, setCatEditId] = useState<string | null>(null);
+
+  // ── Script Queue ──────────────────────────────────────────────────────────
+  const [scriptQueue, setScriptQueue] = useState<Script[]>([]);
+  const [queueDialogOpen, setQueueDialogOpen] = useState(false);
+  const [queueSelectedNodeIds, setQueueSelectedNodeIds] = useState<string[]>([]);
+  const [varValuesPerScript, setVarValuesPerScript] = useState<Record<string, Record<string, string>>>({});
+
   // ── Terminals ─────────────────────────────────────────────────────────────
   const [terminals, setTerminals] = useState<TerminalSession[]>([]);
   const termInstancesRef = useRef<Map<string, TerminalInstance>>(new Map());
@@ -457,11 +477,20 @@ export default function ScriptsPage() {
     } catch { setSecrets([]); }
   }, []);
 
+  const loadCategories = useCallback(async () => {
+    try {
+      const { data } = await api.get('/settings');
+      const raw = data?.node_categories;
+      setCategories(raw ? JSON.parse(raw) : []);
+    } catch { setCategories([]); }
+  }, []);
+
   useEffect(() => {
     loadSshNodes();
     loadScripts();
     loadRwNodes();
     loadSecrets();
+    loadCategories();
   }, []);
 
   // ─── SSH Node handlers ────────────────────────────────────────────────────
@@ -518,6 +547,64 @@ export default function ScriptsPage() {
         ip: rw.address || prev.ip,
       }));
     }
+  };
+
+  // ─── Category handlers ────────────────────────────────────────────────────
+
+  const openAddCategory = () => {
+    setCatEditId(null);
+    setCatForm({ name: '', color: '#1976d2' });
+    setCatDialog(true);
+  };
+
+  const openEditCategory = (cat: NodeCategory) => {
+    setCatEditId(cat.id);
+    setCatForm({ name: cat.name, color: cat.color });
+    setCatDialog(true);
+  };
+
+  const handleSaveCategory = async () => {
+    if (!catForm.name.trim()) { showMsg('error', 'Название обязательно'); return; }
+    const updated = catEditId
+      ? categories.map(c => c.id === catEditId ? { ...c, name: catForm.name, color: catForm.color } : c)
+      : [...categories, { id: crypto.randomUUID(), name: catForm.name, color: catForm.color }];
+    try {
+      await api.post('/settings', { node_categories: JSON.stringify(updated) });
+      setCategories(updated);
+      setCatDialog(false);
+    } catch (e: any) {
+      showMsg('error', e?.response?.data?.message || 'Ошибка сохранения');
+    }
+  };
+
+  const handleDeleteCategory = async (id: string) => {
+    const updated = categories.filter(c => c.id !== id);
+    try {
+      await api.post('/settings', { node_categories: JSON.stringify(updated) });
+      setCategories(updated);
+      // Удалить категорию из всех нод
+      const updatedNodes = sshNodes.map(n => ({
+        ...n,
+        categoryIds: (n.categoryIds || []).filter(cid => cid !== id),
+      }));
+      await Promise.all(updatedNodes
+        .filter((n, i) => JSON.stringify(n.categoryIds) !== JSON.stringify(sshNodes[i].categoryIds))
+        .map(n => api.patch(`/scripts/ssh-nodes/${n.id}`, n)),
+      );
+      await loadSshNodes();
+    } catch (e: any) {
+      showMsg('error', e?.response?.data?.message || 'Ошибка удаления');
+    }
+  };
+
+  const toggleNodeCategory = (catId: string) => {
+    setNodeForm(prev => {
+      const ids = prev.categoryIds || [];
+      return {
+        ...prev,
+        categoryIds: ids.includes(catId) ? ids.filter(id => id !== catId) : [...ids, catId],
+      };
+    });
   };
 
   // ─── Script handlers ───────────────────────────────────────────────────────
@@ -672,6 +759,84 @@ export default function ScriptsPage() {
     setVarValues({});
   };
 
+  // ─── Queue handlers ───────────────────────────────────────────────────────
+
+  const addToQueue = (s: Script) => setScriptQueue(prev => [...prev, s]);
+
+  const removeFromQueue = (index: number) =>
+    setScriptQueue(prev => prev.filter((_, i) => i !== index));
+
+  const moveQueueItem = (index: number, dir: 'up' | 'down') => {
+    setScriptQueue(prev => {
+      const next = [...prev];
+      const swap = dir === 'up' ? index - 1 : index + 1;
+      if (swap < 0 || swap >= next.length) return prev;
+      [next[index], next[swap]] = [next[swap], next[index]];
+      return next;
+    });
+  };
+
+  const openQueueDialog = () => {
+    const initialVars: Record<string, Record<string, string>> = {};
+    for (const s of scriptQueue) {
+      if (!initialVars[s.id]) {
+        const vars = extractVariables(s.content);
+        initialVars[s.id] = Object.fromEntries(vars.map(v => [v.name, '']));
+      }
+    }
+    setVarValuesPerScript(initialVars);
+    setQueueSelectedNodeIds([]);
+    setRunJob(null);
+    setRunLoading(false);
+    setQueueDialogOpen(true);
+  };
+
+  const handleCloseQueueDialog = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    setQueueDialogOpen(false);
+    setRunJob(null);
+    setRunLoading(false);
+  };
+
+  const handleRunQueue = async () => {
+    if (!queueSelectedNodeIds.length) { showMsg('error', 'Выберите хотя бы одну ноду'); return; }
+    for (const s of scriptQueue) {
+      const vars = extractVariables(s.content);
+      const emptyVar = vars.find(v => !varValuesPerScript[s.id]?.[v.name]?.trim());
+      if (emptyVar) {
+        showMsg('error', `Заполните переменную «${emptyVar.label}» для скрипта «${s.name}»`);
+        return;
+      }
+    }
+    try {
+      setRunLoading(true);
+      setRunJob(null);
+      const { data } = await api.post('/scripts/execute-sequence', {
+        scriptIds: scriptQueue.map(s => s.id),
+        nodeIds: queueSelectedNodeIds,
+        variablesPerScript: varValuesPerScript,
+      });
+      startPolling(data.jobId);
+    } catch (e: any) {
+      showMsg('error', e?.response?.data?.message || 'Ошибка запуска');
+      setRunLoading(false);
+    }
+  };
+
+  const selectNodesByCategory = (
+    catId: string,
+    currentIds: string[],
+    setIds: React.Dispatch<React.SetStateAction<string[]>>,
+  ) => {
+    const nodesInCat = sshNodes.filter(n => (n.categoryIds || []).includes(catId)).map(n => n.id);
+    const allSelected = nodesInCat.every(id => currentIds.includes(id));
+    if (allSelected) {
+      setIds(prev => prev.filter(id => !nodesInCat.includes(id)));
+    } else {
+      setIds(prev => [...new Set([...prev, ...nodesInCat])]);
+    }
+  };
+
   // ─── Secrets handlers ────────────────────────────────────────────────────
 
   const openAddSecret = () => {
@@ -798,9 +963,14 @@ export default function ScriptsPage() {
             <Box>
               <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
                 <Typography variant="h6">Ноды</Typography>
-                <Button variant="contained" startIcon={<Add />} size="small" onClick={openAddNode}>
-                  Добавить
-                </Button>
+                <Stack direction="row" spacing={1}>
+                  <Button variant="outlined" startIcon={<Label />} size="small" onClick={() => { setCatDialog(true); setCatEditId(null); setCatForm({ name: '', color: '#1976d2' }); }}>
+                    Категории
+                  </Button>
+                  <Button variant="contained" startIcon={<Add />} size="small" onClick={openAddNode}>
+                    Добавить
+                  </Button>
+                </Stack>
               </Stack>
               <Divider sx={{ mb: 2 }} />
 
@@ -817,6 +987,7 @@ export default function ScriptsPage() {
                       <TableCell>SSH-порт</TableCell>
                       <TableCell>Пользователь</TableCell>
                       <TableCell>Авторизация</TableCell>
+                      <TableCell>Категории</TableCell>
                       <TableCell>Нода RW</TableCell>
                       <TableCell align="right">Действия</TableCell>
                     </TableRow>
@@ -836,6 +1007,17 @@ export default function ScriptsPage() {
                               size="small"
                               variant="outlined"
                             />
+                          </TableCell>
+                          <TableCell>
+                            <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                              {(node.categoryIds || []).map(cid => {
+                                const cat = categories.find(c => c.id === cid);
+                                return cat ? (
+                                  <Chip key={cid} label={cat.name} size="small"
+                                    sx={{ bgcolor: cat.color, color: '#fff', fontSize: '0.7rem' }} />
+                                ) : null;
+                              })}
+                            </Stack>
                           </TableCell>
                           <TableCell>
                             {rw ? (
@@ -884,6 +1066,32 @@ export default function ScriptsPage() {
                   Новый скрипт
                 </Button>
               </Stack>
+
+              {scriptQueue.length > 0 && (
+                <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderColor: 'primary.main', bgcolor: 'action.hover' }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                    <Stack direction="row" spacing={0.5} flexWrap="wrap" alignItems="center" sx={{ flex: 1 }}>
+                      <Typography variant="caption" color="textSecondary" sx={{ mr: 0.5, whiteSpace: 'nowrap' }}>
+                        Очередь:
+                      </Typography>
+                      {scriptQueue.map((s, i) => (
+                        <Chip key={i} label={`${i + 1}. ${s.name}`} size="small"
+                          onDelete={() => removeFromQueue(i)} />
+                      ))}
+                    </Stack>
+                    <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+                      <Button size="small" color="error" variant="text" onClick={() => setScriptQueue([])}>
+                        Очистить
+                      </Button>
+                      <Button size="small" variant="contained" startIcon={<PlayArrow />}
+                        onClick={openQueueDialog} disabled={sshNodes.length === 0}>
+                        Запустить ({scriptQueue.length})
+                      </Button>
+                    </Stack>
+                  </Stack>
+                </Paper>
+              )}
+
               <Divider sx={{ mb: 2 }} />
 
               <Stack spacing={2}>
@@ -939,6 +1147,15 @@ export default function ScriptsPage() {
                           disabled={sshNodes.length === 0}
                         >
                           Запустить
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<Add />}
+                          onClick={() => addToQueue(s)}
+                          disabled={sshNodes.length === 0}
+                        >
+                          В очередь
                         </Button>
                         {s.isBuiltIn ? (
                           <Button
@@ -1174,11 +1391,101 @@ export default function ScriptsPage() {
                 />
               </Box>
             )}
+
+            {categories.length > 0 && (
+              <Box>
+                <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 0.5 }}>
+                  Категории
+                </Typography>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                  {categories.map(cat => {
+                    const selected = (nodeForm.categoryIds || []).includes(cat.id);
+                    return (
+                      <Chip
+                        key={cat.id}
+                        label={cat.name}
+                        size="small"
+                        clickable
+                        onClick={() => toggleNodeCategory(cat.id)}
+                        sx={{
+                          bgcolor: selected ? cat.color : 'transparent',
+                          color: selected ? '#fff' : cat.color,
+                          border: `1px solid ${cat.color}`,
+                          fontWeight: selected ? 600 : 400,
+                        }}
+                      />
+                    );
+                  })}
+                </Stack>
+              </Box>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setNodeDialog(false)}>Отмена</Button>
           <Button variant="contained" onClick={handleSaveNode}>Сохранить</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Categories Dialog ── */}
+      <Dialog open={catDialog} onClose={() => setCatDialog(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Категории нод</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1} sx={{ mt: 1 }}>
+            {categories.length === 0 && (
+              <Typography variant="body2" color="textSecondary">Нет категорий. Создайте первую.</Typography>
+            )}
+            {categories.map(cat => (
+              <Stack key={cat.id} direction="row" spacing={1} alignItems="center">
+                <Box sx={{ width: 20, height: 20, borderRadius: '50%', bgcolor: cat.color, flexShrink: 0 }} />
+                <Typography variant="body2" sx={{ flex: 1 }}>{cat.name}</Typography>
+                <IconButton size="small" onClick={() => openEditCategory(cat)}><Edit fontSize="small" /></IconButton>
+                <IconButton size="small" color="error" onClick={() => handleDeleteCategory(cat.id)}><Delete fontSize="small" /></IconButton>
+              </Stack>
+            ))}
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="subtitle2">{catEditId ? 'Изменить категорию' : 'Новая категория'}</Typography>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TextField
+                label="Название"
+                size="small"
+                value={catForm.name}
+                onChange={e => setCatForm(p => ({ ...p, name: e.target.value }))}
+                sx={{ flex: 1 }}
+              />
+              <Tooltip title="Выбрать цвет">
+                <Box sx={{ position: 'relative', width: 40, height: 40, flexShrink: 0 }}>
+                  <Box
+                    component="input"
+                    type="color"
+                    value={catForm.color}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCatForm(p => ({ ...p, color: e.target.value }))}
+                    sx={{
+                      position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer',
+                      width: '100%', height: '100%', border: 'none', padding: 0,
+                    }}
+                  />
+                  <Box sx={{
+                    width: 40, height: 40, borderRadius: 1, bgcolor: catForm.color,
+                    border: '2px solid', borderColor: 'divider', pointerEvents: 'none',
+                  }} />
+                </Box>
+              </Tooltip>
+            </Stack>
+            <Stack direction="row" spacing={1} justifyContent="flex-end">
+              {catEditId && (
+                <Button size="small" onClick={() => { setCatEditId(null); setCatForm({ name: '', color: '#1976d2' }); }}>
+                  Отмена
+                </Button>
+              )}
+              <Button size="small" variant="contained" onClick={handleSaveCategory}>
+                {catEditId ? 'Сохранить' : 'Добавить'}
+              </Button>
+            </Stack>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCatDialog(false)}>Закрыть</Button>
         </DialogActions>
       </Dialog>
 
@@ -1360,6 +1667,17 @@ export default function ScriptsPage() {
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
                 Выберите ноды для запуска:
               </Typography>
+              {categories.length > 0 && (
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
+                  <Typography variant="caption" color="textSecondary">Категория:</Typography>
+                  {categories.map(cat => (
+                    <Chip key={cat.id} label={cat.name} size="small" clickable
+                      sx={{ bgcolor: cat.color, color: '#fff' }}
+                      onClick={() => selectNodesByCategory(cat.id, selectedNodeIds, setSelectedNodeIds)}
+                    />
+                  ))}
+                </Stack>
+              )}
               {sshNodes.length === 0 ? (
                 <Alert severity="warning">Нет нод. Добавьте ноды на вкладке «Ноды».</Alert>
               ) : (
@@ -1392,6 +1710,13 @@ export default function ScriptsPage() {
                           <Typography variant="caption" color="textSecondary">
                             {node.ip}:{node.sshPort} ({node.sshUser})
                           </Typography>
+                          <Stack direction="row" spacing={0.3}>
+                            {(node.categoryIds || []).map(cid => {
+                              const cat = categories.find(c => c.id === cid);
+                              return cat ? <Chip key={cid} label={cat.name} size="small"
+                                sx={{ bgcolor: cat.color, color: '#fff', fontSize: '0.65rem', height: 18 }} /> : null;
+                            })}
+                          </Stack>
                         </Stack>
                       </Paper>
                     );
@@ -1459,6 +1784,159 @@ export default function ScriptsPage() {
               onClick={handleRunScript}
             >
               Запустить
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Queue Run Dialog ── */}
+      <Dialog open={queueDialogOpen} onClose={handleCloseQueueDialog} maxWidth="md" fullWidth>
+        <DialogTitle>Запуск очереди ({scriptQueue.length} скриптов)</DialogTitle>
+        <DialogContent>
+          {!runJob ? (
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Порядок выполнения:</Typography>
+              <Stack spacing={1} sx={{ mb: 3 }}>
+                {scriptQueue.map((s, i) => (
+                  <Paper key={i} variant="outlined" sx={{ p: 1.5 }}>
+                    <Stack direction="row" spacing={1} alignItems="flex-start">
+                      <Stack direction="column" sx={{ flexShrink: 0 }}>
+                        <IconButton size="small" disabled={i === 0} onClick={() => moveQueueItem(i, 'up')}>
+                          <KeyboardArrowUp fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" disabled={i === scriptQueue.length - 1} onClick={() => moveQueueItem(i, 'down')}>
+                          <KeyboardArrowDown fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                      <Box sx={{ flex: 1 }}>
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                          <Chip label={String(i + 1)} size="small" color="primary" />
+                          <Typography variant="body2" fontWeight={600}>{s.name}</Typography>
+                          {s.isBuiltIn && <Chip label="Встроенный" size="small" color="info" variant="outlined" />}
+                        </Stack>
+                        {extractVariables(s.content).length > 0 && (
+                          <Stack spacing={1} sx={{ mt: 1 }}>
+                            {extractVariables(s.content).map(v => (
+                              <TextField
+                                key={v.name}
+                                label={v.label}
+                                size="small"
+                                fullWidth
+                                value={varValuesPerScript[s.id]?.[v.name] ?? ''}
+                                onChange={e => setVarValuesPerScript(prev => ({
+                                  ...prev,
+                                  [s.id]: { ...prev[s.id], [v.name]: e.target.value },
+                                }))}
+                                slotProps={{
+                                  input: {
+                                    style: { fontFamily: 'monospace', fontSize: '0.85rem' },
+                                    endAdornment: secrets.length > 0 ? (
+                                      <Tooltip title="Вставить из секретов">
+                                        <IconButton size="small" edge="end"
+                                          onClick={() => openSecretPicker(val => setVarValuesPerScript(prev => ({
+                                            ...prev,
+                                            [s.id]: { ...prev[s.id], [v.name]: val },
+                                          })))}>
+                                          <LockOpen fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                    ) : undefined,
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        )}
+                      </Box>
+                      <IconButton size="small" color="error" onClick={() => removeFromQueue(i)}>
+                        <Delete fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+
+              <Divider sx={{ mb: 2 }} />
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Выберите ноды для запуска:</Typography>
+              {categories.length > 0 && (
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
+                  <Typography variant="caption" color="textSecondary">Категория:</Typography>
+                  {categories.map(cat => (
+                    <Chip key={cat.id} label={cat.name} size="small" clickable
+                      sx={{ bgcolor: cat.color, color: '#fff' }}
+                      onClick={() => selectNodesByCategory(cat.id, queueSelectedNodeIds, setQueueSelectedNodeIds)}
+                    />
+                  ))}
+                </Stack>
+              )}
+              {sshNodes.length === 0 ? (
+                <Alert severity="warning">Нет нод.</Alert>
+              ) : (
+                <Stack spacing={1}>
+                  {sshNodes.map(node => {
+                    const selected = queueSelectedNodeIds.includes(node.id);
+                    return (
+                      <Paper key={node.id} variant="outlined"
+                        sx={{ p: 1.5, cursor: 'pointer', borderColor: selected ? 'primary.main' : undefined, bgcolor: selected ? 'action.selected' : undefined }}
+                        onClick={() => setQueueSelectedNodeIds(prev => prev.includes(node.id) ? prev.filter(id => id !== node.id) : [...prev, node.id])}>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Box sx={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid', borderColor: selected ? 'primary.main' : 'text.disabled', bgcolor: selected ? 'primary.main' : 'transparent', flexShrink: 0 }} />
+                          <Typography variant="body2" fontWeight={selected ? 600 : 400}>{node.name}</Typography>
+                          <Typography variant="caption" color="textSecondary">{node.ip}:{node.sshPort} ({node.sshUser})</Typography>
+                          <Stack direction="row" spacing={0.3}>
+                            {(node.categoryIds || []).map(cid => {
+                              const cat = categories.find(c => c.id === cid);
+                              return cat ? <Chip key={cid} label={cat.name} size="small"
+                                sx={{ bgcolor: cat.color, color: '#fff', fontSize: '0.65rem', height: 18 }} /> : null;
+                            })}
+                          </Stack>
+                        </Stack>
+                      </Paper>
+                    );
+                  })}
+                </Stack>
+              )}
+            </Box>
+          ) : (
+            <Box>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+                <Typography variant="subtitle2">Статус:</Typography>
+                {runJob.status === 'running' && <CircularProgress size={16} />}
+                <Chip
+                  label={runJob.status === 'running' ? 'Выполняется' : runJob.status === 'success' ? 'Успешно' : 'Ошибка'}
+                  color={runJob.status === 'running' ? 'default' : runJob.status === 'success' ? 'success' : 'error'}
+                  size="small"
+                />
+              </Stack>
+              <Stack spacing={2}>
+                {runJob.results.map(result => (
+                  <Box key={result.nodeId}>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                      <Typography variant="body2" fontWeight={600}>{result.nodeName}</Typography>
+                      <Chip label={result.status === 'running' ? '...' : result.status === 'success' ? 'OK' : 'Ошибка'}
+                        color={result.status === 'running' ? 'default' : result.status === 'success' ? 'success' : 'error'}
+                        size="small" />
+                    </Stack>
+                    <Box component="pre" sx={{ fontSize: '0.7rem', bgcolor: 'action.hover', borderRadius: 1, p: 1.5, overflowX: 'auto', maxHeight: 300, overflowY: 'auto', m: 0, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                      {result.logs.join('\n') || '...'}
+                    </Box>
+                  </Box>
+                ))}
+              </Stack>
+              <div ref={logsEndRef} />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseQueueDialog}>
+            {runJob && runJob.status !== 'running' ? 'Закрыть' : 'Отмена'}
+          </Button>
+          {!runJob && (
+            <Button variant="contained"
+              startIcon={runLoading ? <CircularProgress size={16} /> : <PlayArrow />}
+              disabled={runLoading || queueSelectedNodeIds.length === 0 || scriptQueue.length === 0}
+              onClick={handleRunQueue}>
+              Запустить ({scriptQueue.length})
             </Button>
           )}
         </DialogActions>

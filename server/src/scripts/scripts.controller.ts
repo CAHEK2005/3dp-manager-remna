@@ -111,6 +111,19 @@ export class ScriptsController {
     }
   }
 
+  @Post('execute-sequence')
+  async executeSequence(@Body() body: {
+    scriptIds: string[];
+    nodeIds: string[];
+    variablesPerScript: Record<string, Record<string, string>>;
+  }) {
+    try {
+      return await this.scriptsService.executeSequence(body.scriptIds, body.nodeIds, body.variablesPerScript ?? {});
+    } catch (e) {
+      throw new HttpException(e.message, HttpStatus.BAD_REQUEST);
+    }
+  }
+
   @Get('execute/:jobId')
   getExecuteStatus(@Param('jobId') jobId: string) {
     const job = this.scriptsService.getJobStatus(jobId);

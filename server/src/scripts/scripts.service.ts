@@ -16,6 +16,7 @@ export interface SshNode {
   authType: 'password' | 'key';
   password?: string;
   sshKey?: string;
+  categoryIds?: string[];
 }
 
 export interface Script {
@@ -349,6 +350,74 @@ export class ScriptsService implements OnModuleInit {
       job.status = 'error';
     }).finally(() => {
       // Auto-cleanup completed jobs after 1 hour to prevent memory leak
+      setTimeout(() => this.jobs.delete(jobId), 3_600_000);
+    });
+
+    return { jobId };
+  }
+
+  async executeSequence(
+    scriptIds: string[],
+    nodeIds: string[],
+    variablesPerScript: Record<string, Record<string, string>>,
+  ): Promise<{ jobId: string }> {
+    if (!scriptIds.length) throw new Error('Список скриптов пуст');
+
+    const scripts = await this.loadScripts();
+    const resolvedScripts = scriptIds.map(id => {
+      const s = scripts.find(sc => sc.id === id);
+      if (!s) throw new Error(`Скрипт не найден: ${id}`);
+      return s;
+    });
+
+    const nodes = await this.loadSshNodes();
+    const targetNodes = nodes.filter(n => nodeIds.includes(n.id));
+    if (!targetNodes.length) throw new Error('Не выбрано ни одной ноды');
+
+    const sensitiveValues = Object.values(variablesPerScript)
+      .flatMap(vars => Object.values(vars))
+      .filter(v => v.length > 3);
+
+    const jobId = uuidv4();
+    const job: ScriptJob = {
+      scriptName: resolvedScripts.map(s => s.name).join(' → '),
+      status: 'running',
+      results: targetNodes.map(n => ({
+        nodeId: n.id,
+        nodeName: n.name,
+        logs: [],
+        status: 'running',
+      })),
+    };
+    this.jobs.set(jobId, job);
+
+    const nodePromises = targetNodes.map(async (node, idx) => {
+      const result = job.results[idx];
+      for (let i = 0; i < resolvedScripts.length; i++) {
+        const script = resolvedScripts[i];
+        const vars = variablesPerScript[script.id] ?? {};
+        const content = Object.keys(vars).length > 0
+          ? this.substituteVariables(script.content, vars)
+          : script.content;
+
+        result.logs.push(`=== Скрипт ${i + 1}: ${script.name} ===`);
+
+        try {
+          await this.runScriptOnNode(node, content, result, sensitiveValues);
+        } catch (e) {
+          result.logs.push(this.maskSecrets(`[ERROR] ${e?.message || String(e)}`, sensitiveValues));
+          result.status = 'error';
+          return;
+        }
+      }
+      result.status = 'success';
+    });
+
+    Promise.all(nodePromises).then(() => {
+      job.status = job.results.every(r => r.status === 'success') ? 'success' : 'error';
+    }).catch(() => {
+      job.status = 'error';
+    }).finally(() => {
       setTimeout(() => this.jobs.delete(jobId), 3_600_000);
     });
 
