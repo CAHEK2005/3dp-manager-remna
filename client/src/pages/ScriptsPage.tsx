@@ -7,8 +7,8 @@ import {
   TableRow, Tabs, TextField, Tooltip, Typography, useMediaQuery, useTheme,
 } from '@mui/material';
 import {
-  Add, Close, ContentCopy, CropSquare, Delete, Edit, FileDownload,
-  KeyboardArrowDown, KeyboardArrowUp, Label, MoreVert,
+  Add, CheckCircle, Close, ContentCopy, CropSquare, Delete, Edit, ErrorOutlined,
+  FileDownload, History, KeyboardArrowDown, KeyboardArrowUp, Label, MoreVert,
   LockOpen, OpenInNew, PlayArrow, Remove, Restore, Terminal, UploadFile, VpnKey,
 } from '@mui/icons-material';
 import type { SelectChangeEvent } from '@mui/material/Select';
@@ -77,6 +77,49 @@ interface RwNode {
   uuid: string;
   name: string;
   address: string;
+}
+
+interface HistoryListItem {
+  id: string;
+  scriptId: string;
+  scriptName: string;
+  status: 'success' | 'error';
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  nodeCount: number;
+  successCount: number;
+}
+
+interface HistoryNodeResult {
+  nodeId: string;
+  nodeName: string;
+  status: 'success' | 'error';
+  logs: string[];
+}
+
+interface HistoryEntryDetail {
+  id: string;
+  scriptName: string;
+  status: 'success' | 'error';
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  nodeResults: HistoryNodeResult[];
+}
+
+function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}с`;
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return sec > 0 ? `${m}м ${sec}с` : `${m}м`;
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleString('ru-RU', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+  });
 }
 
 interface NodeResult {
@@ -465,6 +508,14 @@ export default function ScriptsPage() {
   const [secretPickerOpen, setSecretPickerOpen] = useState(false);
   const [secretPickerCallback, setSecretPickerCallback] = useState<((v: string) => void) | null>(null);
 
+  // ── History ───────────────────────────────────────────────────────────────
+  const [historyItems, setHistoryItems] = useState<HistoryListItem[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyRowsPerPage, setHistoryRowsPerPage] = useState(20);
+  const [historyDetail, setHistoryDetail] = useState<HistoryEntryDetail | null>(null);
+  const [historyDetailLoading, setHistoryDetailLoading] = useState(false);
+
   // ── Categories ────────────────────────────────────────────────────────────
   const [categories, setCategories] = useState<NodeCategory[]>([]);
   const [catDialog, setCatDialog] = useState(false);
@@ -542,6 +593,32 @@ export default function ScriptsPage() {
       setCategories(raw ? JSON.parse(raw) : []);
     } catch { setCategories([]); }
   }, []);
+
+  const loadHistory = useCallback(async (page = 0, rowsPerPage = 20) => {
+    try {
+      const { data } = await api.get(`/scripts/history?page=${page + 1}&limit=${rowsPerPage}`);
+      setHistoryItems(data.data);
+      setHistoryTotal(data.total);
+    } catch { setHistoryItems([]); setHistoryTotal(0); }
+  }, []);
+
+  const openHistoryDetail = async (id: string) => {
+    setHistoryDetailLoading(true);
+    setHistoryDetail(null);
+    try {
+      const { data } = await api.get(`/scripts/history/${id}`);
+      setHistoryDetail(data);
+    } catch { /* silent */ }
+    setHistoryDetailLoading(false);
+  };
+
+  const handleClearHistory = () => {
+    askDelete('Очистить историю', 'Удалить всю историю выполнения скриптов?', async () => {
+      setConfirmDel(d => ({ ...d, open: false }));
+      await api.delete('/scripts/history').catch(() => {});
+      loadHistory(historyPage, historyRowsPerPage);
+    });
+  };
 
   useEffect(() => {
     loadSshNodes();
@@ -815,6 +892,10 @@ export default function ScriptsPage() {
   }, [runJob]);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  useEffect(() => {
+    if (tab === 3) loadHistory(historyPage, historyRowsPerPage);
+  }, [tab, historyPage, historyRowsPerPage]);
 
   const handleRunScript = async () => {
     if (!runScript || !selectedNodeIds.length) {
@@ -1093,6 +1174,7 @@ export default function ScriptsPage() {
           <Tab label="Ноды" />
           <Tab label="Скрипты" />
           <Tab label="Секреты" />
+          <Tab label="История" icon={<History sx={{ fontSize: 16 }} />} iconPosition="start" />
         </Tabs>
 
         <Box sx={{ p: { xs: 2, md: 3 } }}>
@@ -1401,6 +1483,93 @@ export default function ScriptsPage() {
                     ))}
                   </TableBody>
                 </Table>
+              )}
+            </Box>
+          )}
+
+          {/* ── Tab 3: История ── */}
+          {tab === 3 && (
+            <Box>
+              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ mb: 2, gap: 1 }}>
+                <Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>История выполнения</Typography>
+                  <Typography variant="caption" color="text.secondary">Все завершённые запуски скриптов</Typography>
+                </Box>
+                {historyItems.length > 0 && (
+                  <Button variant="outlined" color="error" size="small" startIcon={<Remove />} onClick={handleClearHistory}>
+                    Очистить историю
+                  </Button>
+                )}
+              </Stack>
+
+              {historyItems.length === 0 ? (
+                <Alert severity="info">
+                  История пуста. Запустите любой скрипт — результаты будут сохраняться здесь.
+                </Alert>
+              ) : (
+                <Box sx={{ overflowX: 'auto' }}>
+                  <Table size="small" sx={{ minWidth: 500 }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Скрипт</TableCell>
+                        <TableCell>Статус</TableCell>
+                        <TableCell>Ноды</TableCell>
+                        <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Начало</TableCell>
+                        <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Длительность</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {historyItems.map(item => (
+                        <TableRow
+                          key={item.id}
+                          hover
+                          sx={{ cursor: 'pointer' }}
+                          onClick={() => openHistoryDetail(item.id)}
+                        >
+                          <TableCell>
+                            <Typography variant="body2" fontWeight={500}>{item.scriptName}</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Stack direction="row" spacing={0.5} alignItems="center">
+                              {item.status === 'success'
+                                ? <CheckCircle sx={{ fontSize: 16, color: 'success.main' }} />
+                                : <ErrorOutlined sx={{ fontSize: 16, color: 'error.main' }} />}
+                              <Typography variant="body2" color={item.status === 'success' ? 'success.main' : 'error.main'}>
+                                {item.status === 'success' ? 'Успешно' : 'Ошибка'}
+                              </Typography>
+                            </Stack>
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={`${item.successCount}/${item.nodeCount}`}
+                              size="small"
+                              color={item.successCount === item.nodeCount ? 'success' : item.successCount === 0 ? 'error' : 'warning'}
+                              variant="outlined"
+                            />
+                          </TableCell>
+                          <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+                            <Typography variant="body2" color="text.secondary">{formatDate(item.startedAt)}</Typography>
+                          </TableCell>
+                          <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+                            <Typography variant="body2" color="text.secondary">{formatDuration(item.durationMs)}</Typography>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <TablePagination
+                    component="div"
+                    count={historyTotal}
+                    page={historyPage}
+                    onPageChange={(_, p) => setHistoryPage(p)}
+                    rowsPerPage={historyRowsPerPage}
+                    onRowsPerPageChange={e => { setHistoryRowsPerPage(parseInt(e.target.value, 10)); setHistoryPage(0); }}
+                    rowsPerPageOptions={[10, 20, 50]}
+                    labelRowsPerPage="На странице:"
+                    labelDisplayedRows={({ from, to, count }) => `${from}–${to} из ${count}`}
+                    sx={{ '.MuiTablePagination-toolbar': { minHeight: 40 } }}
+                  />
+                </Box>
               )}
             </Box>
           )}
@@ -2346,6 +2515,79 @@ export default function ScriptsPage() {
           {msg.text}
         </Alert>
       </Snackbar>
+
+      {/* ── History Detail Dialog ── */}
+      <Dialog open={Boolean(historyDetail || historyDetailLoading)} onClose={() => setHistoryDetail(null)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <History sx={{ color: 'text.secondary', fontSize: 20 }} />
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="subtitle1" fontWeight={600}>
+                {historyDetail?.scriptName ?? '...'}
+              </Typography>
+              {historyDetail && (
+                <Typography variant="caption" color="text.secondary">
+                  {formatDate(historyDetail.startedAt)} · {formatDuration(historyDetail.durationMs)}
+                </Typography>
+              )}
+            </Box>
+            {historyDetail && (
+              <Chip
+                label={historyDetail.status === 'success' ? 'Успешно' : 'Ошибка'}
+                color={historyDetail.status === 'success' ? 'success' : 'error'}
+                size="small"
+              />
+            )}
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          {historyDetailLoading && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={32} />
+            </Box>
+          )}
+          {historyDetail && (
+            <Stack spacing={2}>
+              {historyDetail.nodeResults.map(result => (
+                <Box key={result.nodeId}>
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                    {result.status === 'success'
+                      ? <CheckCircle sx={{ fontSize: 16, color: 'success.main' }} />
+                      : <ErrorOutlined sx={{ fontSize: 16, color: 'error.main' }} />}
+                    <Typography variant="body2" fontWeight={600}>{result.nodeName}</Typography>
+                    <Chip
+                      label={result.status === 'success' ? 'OK' : 'Ошибка'}
+                      color={result.status === 'success' ? 'success' : 'error'}
+                      size="small"
+                    />
+                  </Stack>
+                  <Box
+                    component="pre"
+                    sx={{
+                      fontSize: '0.7rem',
+                      bgcolor: 'action.hover',
+                      borderRadius: 1,
+                      p: 1.5,
+                      overflowX: 'auto',
+                      maxHeight: 300,
+                      overflowY: 'auto',
+                      m: 0,
+                      fontFamily: 'monospace',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {result.logs.join('\n') || '(нет вывода)'}
+                  </Box>
+                </Box>
+              ))}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setHistoryDetail(null)}>Закрыть</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ── Floating terminal windows ── */}
       {terminals.map((session, index) => (

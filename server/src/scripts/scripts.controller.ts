@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Delete,
-  Body, Param, HttpException, HttpStatus,
+  Body, Param, Query, HttpException, HttpStatus,
 } from '@nestjs/common';
 import { ScriptsService } from './scripts.service';
 
@@ -146,5 +146,25 @@ export class ScriptsController {
     const job = this.scriptsService.getJobStatus(jobId);
     if (!job) throw new HttpException('Job not found', HttpStatus.NOT_FOUND);
     return job;
+  }
+
+  // ── History ──────────────────────────────────────────────────────────────────
+
+  @Get('history')
+  async getHistory(@Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.scriptsService.getHistory(Number(page) || 1, Number(limit) || 20);
+  }
+
+  @Get('history/:id')
+  async getHistoryEntry(@Param('id') id: string) {
+    const entry = await this.scriptsService.getHistoryEntry(id);
+    if (!entry) throw new HttpException('Запись не найдена', HttpStatus.NOT_FOUND);
+    return entry;
+  }
+
+  @Delete('history')
+  async clearHistory() {
+    await this.scriptsService.clearHistory();
+    return { success: true };
   }
 }

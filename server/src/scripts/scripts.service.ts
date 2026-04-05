@@ -42,6 +42,36 @@ export interface ScriptJob {
   results: NodeResult[];
 }
 
+export interface HistoryNodeResult {
+  nodeId: string;
+  nodeName: string;
+  status: 'success' | 'error';
+  logs: string[];
+}
+
+export interface HistoryEntry {
+  id: string;
+  scriptId: string;
+  scriptName: string;
+  status: 'success' | 'error';
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  nodeResults: HistoryNodeResult[];
+}
+
+export interface HistoryListItem {
+  id: string;
+  scriptId: string;
+  scriptName: string;
+  status: 'success' | 'error';
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  nodeCount: number;
+  successCount: number;
+}
+
 const SYSCTL_CONTENT = `net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
@@ -424,6 +454,50 @@ export class ScriptsService implements OnModuleInit {
     return reverted;
   }
 
+  // ── History ──────────────────────────────────────────────────────────────────
+
+  private async loadHistory(): Promise<HistoryEntry[]> {
+    const raw = await this.settingRepo.findOne({ where: { key: 'script_history' } });
+    try { return JSON.parse(raw?.value || '[]'); } catch { return []; }
+  }
+
+  private async appendHistory(entry: HistoryEntry): Promise<void> {
+    try {
+      const history = await this.loadHistory();
+      history.unshift(entry);
+      await this.saveSetting('script_history', JSON.stringify(history.slice(0, 100)));
+    } catch (e) {
+      this.logger.error('Ошибка сохранения истории:', e);
+    }
+  }
+
+  async getHistory(page = 1, limit = 20): Promise<{ data: HistoryListItem[]; total: number }> {
+    const history = await this.loadHistory();
+    const total = history.length;
+    const start = (page - 1) * limit;
+    const data = history.slice(start, start + limit).map(e => ({
+      id: e.id,
+      scriptId: e.scriptId,
+      scriptName: e.scriptName,
+      status: e.status,
+      startedAt: e.startedAt,
+      finishedAt: e.finishedAt,
+      durationMs: e.durationMs,
+      nodeCount: e.nodeResults.length,
+      successCount: e.nodeResults.filter(r => r.status === 'success').length,
+    }));
+    return { data, total };
+  }
+
+  async getHistoryEntry(id: string): Promise<HistoryEntry | null> {
+    const history = await this.loadHistory();
+    return history.find(e => e.id === id) ?? null;
+  }
+
+  async clearHistory(): Promise<void> {
+    await this.saveSetting('script_history', '[]');
+  }
+
   // ── Execute ──────────────────────────────────────────────────────────────────
 
   async executeScript(
@@ -446,6 +520,7 @@ export class ScriptsService implements OnModuleInit {
     ].filter(v => v.length > 3);
 
     const jobId = uuidv4();
+    const startedAt = new Date().toISOString();
     const job: ScriptJob = {
       scriptName: script.name,
       status: 'running',
@@ -478,8 +553,23 @@ export class ScriptsService implements OnModuleInit {
       job.status = job.results.every(r => r.status === 'success') ? 'success' : 'error';
     }).catch(() => {
       job.status = 'error';
-    }).finally(() => {
-      // Auto-cleanup completed jobs after 1 hour to prevent memory leak
+    }).finally(async () => {
+      const finishedAt = new Date().toISOString();
+      await this.appendHistory({
+        id: jobId,
+        scriptId,
+        scriptName: script.name,
+        status: job.status as 'success' | 'error',
+        startedAt,
+        finishedAt,
+        durationMs: new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
+        nodeResults: job.results.map(r => ({
+          nodeId: r.nodeId,
+          nodeName: r.nodeName,
+          status: r.status as 'success' | 'error',
+          logs: r.logs,
+        })),
+      });
       setTimeout(() => this.jobs.delete(jobId), 3_600_000);
     });
 
@@ -513,8 +603,10 @@ export class ScriptsService implements OnModuleInit {
     ].filter(v => v.length > 3);
 
     const jobId = uuidv4();
+    const startedAt = new Date().toISOString();
+    const scriptName = resolvedScripts.map(s => s.name).join(' → ');
     const job: ScriptJob = {
-      scriptName: resolvedScripts.map(s => s.name).join(' → '),
+      scriptName,
       status: 'running',
       results: targetNodes.map(n => ({
         nodeId: n.id,
@@ -553,7 +645,23 @@ export class ScriptsService implements OnModuleInit {
       job.status = job.results.every(r => r.status === 'success') ? 'success' : 'error';
     }).catch(() => {
       job.status = 'error';
-    }).finally(() => {
+    }).finally(async () => {
+      const finishedAt = new Date().toISOString();
+      await this.appendHistory({
+        id: jobId,
+        scriptId: scriptIds.join(','),
+        scriptName,
+        status: job.status as 'success' | 'error',
+        startedAt,
+        finishedAt,
+        durationMs: new Date(finishedAt).getTime() - new Date(startedAt).getTime(),
+        nodeResults: job.results.map(r => ({
+          nodeId: r.nodeId,
+          nodeName: r.nodeName,
+          status: r.status as 'success' | 'error',
+          logs: r.logs,
+        })),
+      });
       setTimeout(() => this.jobs.delete(jobId), 3_600_000);
     });
 
