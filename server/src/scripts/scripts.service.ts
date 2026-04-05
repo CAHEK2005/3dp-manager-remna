@@ -123,14 +123,14 @@ else
   echo "  Учётная запись уже зарегистрирована, пропускаем"
 fi
 
-warp-cli mode proxy
+warp-cli mode proxy --accept-tos
 
 if [ "\$PROXY_PORT" != "40000" ]; then
   echo "  Устанавливаем порт прокси: \$PROXY_PORT"
-  warp-cli proxy port "\$PROXY_PORT"
+  warp-cli proxy port "\$PROXY_PORT" --accept-tos
 fi
 
-warp-cli connect
+warp-cli connect --accept-tos
 sleep 3
 
 # ── Итог ─────────────────────────────────────────────────────────────────────
