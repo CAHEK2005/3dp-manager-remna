@@ -143,7 +143,7 @@ export default function SettingsPage() {
 
         {/* Tab 0: Connection */}
         <TabPanel value={tab} index={0}>
-          <Box sx={{ p: 3 }}>
+          <Box sx={{ p: { xs: 2, md: 3 } }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>Подключение к Remnawave</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               URL панели и API-ключ для управления профилями
@@ -177,7 +177,7 @@ export default function SettingsPage() {
 
         {/* Tab 1: System */}
         <TabPanel value={tab} index={1}>
-          <Box sx={{ p: 3 }}>
+          <Box sx={{ p: { xs: 2, md: 3 } }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>Доступ к RWManager</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               Учётные данные администратора
@@ -201,7 +201,7 @@ export default function SettingsPage() {
 
         {/* Tab 2: Telegram */}
         <TabPanel value={tab} index={2}>
-          <Box sx={{ p: 3 }}>
+          <Box sx={{ p: { xs: 2, md: 3 } }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>Telegram-уведомления</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               Отправка уведомлений о результатах ротации

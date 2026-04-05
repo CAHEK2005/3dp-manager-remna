@@ -1076,7 +1076,7 @@ export default function ScriptsPage() {
           <Tab label="Секреты" />
         </Tabs>
 
-        <Box sx={{ p: 3 }}>
+        <Box sx={{ p: { xs: 2, md: 3 } }}>
 
           {/* ── Tab 0: SSH Nodes ── */}
           {tab === 0 && (
@@ -1181,7 +1181,7 @@ export default function ScriptsPage() {
           {/* ── Tab 1: Scripts ── */}
           {tab === 1 && (
             <Box>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ mb: 2, gap: 1 }}>
                 <Box>
                   <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Скрипты</Typography>
                   <Typography variant="caption" color="text.secondary">Bash-скрипты для выполнения на нодах</Typography>
@@ -1264,8 +1264,8 @@ export default function ScriptsPage() {
                       </Box>
                     </Stack>
                     {/* Card footer */}
-                    <Stack direction="row" justifyContent="space-between" alignItems="center"
-                      sx={{ mt: 1.5, pt: 1.5, borderTop: 1, borderColor: 'divider' }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap"
+                      sx={{ mt: 1.5, pt: 1.5, borderTop: 1, borderColor: 'divider', gap: 1 }}>
                       <Stack direction="row" spacing={1}>
                         <Button size="small" variant="contained" startIcon={<PlayArrow />}
                           onClick={() => openRunDialog(s)} disabled={sshNodes.length === 0}>
@@ -1309,7 +1309,7 @@ export default function ScriptsPage() {
           {/* ── Tab 2: Secrets ── */}
           {tab === 2 && (
             <Box>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ mb: 2, gap: 1 }}>
                 <Box>
                   <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Секреты</Typography>
                   <Typography variant="caption" color="text.secondary">Зашифрованное хранилище паролей, ключей и токенов</Typography>

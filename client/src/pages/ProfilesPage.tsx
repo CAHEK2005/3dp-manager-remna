@@ -856,12 +856,12 @@ export default function ProfilesPage() {
                 </Tabs>
               </Box>
 
-              <Box sx={{ p: 3 }}>
+              <Box sx={{ p: { xs: 2, md: 3 } }}>
 
                 {/* ── Tab 0: Inbounds ── */}
                 {profileTab === 0 && (
                   <Box>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ mb: 2, gap: 1 }}>
                       <Typography variant="h6">Инбаунды для ротации</Typography>
                       <Button variant="outlined" startIcon={<Add />} onClick={addInbound} size="small">
                         Добавить
@@ -883,7 +883,7 @@ export default function ProfilesPage() {
                           const sniEntry = sniData.find(s => s.tag === effectiveTag);
                           return (
                           <Box key={idx} sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                            <FormControl size="small" sx={{ minWidth: 200 }}>
+                            <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 200 } }}>
                               <InputLabel>Тип</InputLabel>
                               <Select
                                 value={item.type}
@@ -900,16 +900,16 @@ export default function ProfilesPage() {
                               size="small" label="Порт" value={item.port}
                               onChange={e => updateInbound(idx, 'port', e.target.value)}
                               helperText="random или число"
-                              sx={{ width: 130 }}
+                              sx={{ width: { xs: '100%', sm: 130 } }}
                             />
 
                             {SNI_TYPES.has(item.type) && (
-                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, width: { xs: '100%', sm: 'auto' } }}>
                                 <TextField
                                   size="small" label="SNI" value={item.sni || ''}
                                   onChange={e => updateInbound(idx, 'sni', e.target.value)}
                                   helperText="random или домен"
-                                  sx={{ width: 200 }}
+                                  sx={{ width: { xs: '100%', sm: 200 } }}
                                 />
                                 {sniEntry && sniEntry.sni && sniEntry.sni !== '-' && (
                                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -1099,7 +1099,7 @@ export default function ProfilesPage() {
                     </Paper>
 
                     <Paper variant="outlined" sx={{ p: 2 }}>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                      <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} sx={{ mb: 2, gap: 1 }}>
                         <Typography variant="subtitle1">Маппинг хостов (по тегу инбаунда)</Typography>
                         <Stack direction="row" spacing={1}>
                           <Button size="small" onClick={() => selectedProfile && loadSni(selectedProfile.uuid)} variant="outlined">
