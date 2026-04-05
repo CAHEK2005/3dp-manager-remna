@@ -123,14 +123,14 @@ else
   echo "  Учётная запись уже зарегистрирована, пропускаем"
 fi
 
-warp-cli mode proxy --accept-tos
+warp-cli mode proxy
 
 if [ "\$PROXY_PORT" != "40000" ]; then
   echo "  Устанавливаем порт прокси: \$PROXY_PORT"
-  warp-cli proxy port "\$PROXY_PORT" --accept-tos
+  warp-cli proxy port "\$PROXY_PORT"
 fi
 
-warp-cli connect --accept-tos
+warp-cli connect
 sleep 3
 
 # ── Итог ─────────────────────────────────────────────────────────────────────
@@ -564,6 +564,11 @@ export class ScriptsService implements OnModuleInit {
     return this.jobs.get(jobId) || null;
   }
 
+  private stripAnsi(text: string): string {
+    // eslint-disable-next-line no-control-regex
+    return text.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\r/g, '');
+  }
+
   private runScriptOnNode(node: SshNode, content: string, result: NodeResult, mask: string[]): Promise<void> {
     return new Promise((resolve, reject) => {
       const conn = new Client();
@@ -574,7 +579,9 @@ export class ScriptsService implements OnModuleInit {
         const cmd = useSudo
           ? `sudo bash -e << 'SCRIPT_EOF'\n${content}\nSCRIPT_EOF`
           : `bash -e << 'SCRIPT_EOF'\n${content}\nSCRIPT_EOF`;
-        conn.exec(cmd, (err, stream) => {
+
+        // Allocate a PTY so interactive programs (e.g. warp-cli) see a real terminal
+        conn.exec(cmd, { pty: { term: 'xterm', cols: 200, rows: 50 } }, (err, stream) => {
           if (err) {
             result.logs.push(this.maskSecrets(`[ERROR] ${err.message}`, mask));
             conn.end();
@@ -582,12 +589,19 @@ export class ScriptsService implements OnModuleInit {
           }
 
           stream.on('data', (data: Buffer) => {
-            data.toString().split('\n').filter(Boolean)
+            const text = this.stripAnsi(data.toString());
+            // Auto-respond 'y' to common y/n confirmation prompts (e.g. ToS acceptance)
+            if (/\[y\/n\]|\[Y\/N\]|\[yes\/no\]/i.test(text)) {
+              stream.write('y\n');
+              result.logs.push('[AUTO] Отправлен ответ "y" на запрос подтверждения');
+            }
+            text.split('\n').filter(l => l.trim())
               .forEach(l => result.logs.push(this.maskSecrets(l, mask)));
           });
 
+          // With PTY, stderr is merged into stdout — keep handler for non-PTY compat
           stream.stderr.on('data', (data: Buffer) => {
-            data.toString().split('\n').filter(Boolean)
+            this.stripAnsi(data.toString()).split('\n').filter(Boolean)
               .forEach(l => result.logs.push(this.maskSecrets(`[stderr] ${l}`, mask)));
           });
 
