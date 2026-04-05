@@ -117,7 +117,7 @@ WARP_STATUS=\$(warp-cli status 2>&1 || true)
 
 if echo "\$WARP_STATUS" | grep -qi "Registration Missing"; then
   echo "  Регистрация новой учётной записи..."
-  warp-cli registration new --accept-tos
+  warp-cli registration new
   sleep 2
 else
   echo "  Учётная запись уже зарегистрирована, пропускаем"
