@@ -253,4 +253,17 @@ export class ScriptsController {
     await this.scriptsService.clearHistory();
     return { success: true };
   }
+
+  // ── Hysteria2 ─────────────────────────────────────────────────────────────────
+
+  @Post('hysteria2/create-profile')
+  async createHysteria2Profile(
+    @Body() body: { sshNodeId: string; profileName: string; domain: string },
+  ) {
+    try {
+      return await this.scriptsService.createHysteria2Profile(body.sshNodeId, body.profileName, body.domain);
+    } catch (e) {
+      throw new HttpException(e?.message || 'Ошибка создания профиля', HttpStatus.BAD_REQUEST);
+    }
+  }
 }

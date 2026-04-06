@@ -9,7 +9,7 @@ import {
 import {
   Add, CheckCircle, Close, ContentCopy, CropSquare, Delete, Edit, ErrorOutline,
   FileDownload, History, KeyboardArrowDown, KeyboardArrowUp, Label, MoreVert,
-  LockOpen, OpenInNew, PlayArrow, Remove, Restore, Terminal, UploadFile, VpnKey,
+  LockOpen, OpenInNew, PlayArrow, Remove, Restore, Security, Terminal, UploadFile, VpnKey,
 } from '@mui/icons-material';
 import type { SelectChangeEvent } from '@mui/material/Select';
 import { Terminal as XTerm } from '@xterm/xterm';
@@ -546,6 +546,30 @@ export default function ScriptsPage() {
   // ── Overflow menus ────────────────────────────────────────────────────────
   const [nodeRowMenu, setNodeRowMenu] = useState<{ el: HTMLElement; nodeId: string; nodeName: string } | null>(null);
   const [secretRowMenu, setSecretRowMenu] = useState<{ el: HTMLElement; id: string; name: string } | null>(null);
+
+  // ── Hysteria2 profile dialog ──────────────────────────────────────────────
+  const [hy2Dialog, setHy2Dialog] = useState<{ open: boolean; sshNodeId: string; sshNodeName: string } | null>(null);
+  const [hy2ProfileName, setHy2ProfileName] = useState('');
+  const [hy2Domain, setHy2Domain] = useState('');
+  const [hy2Loading, setHy2Loading] = useState(false);
+
+  const handleCreateHysteria2Profile = async () => {
+    if (!hy2Dialog || !hy2ProfileName.trim() || !hy2Domain.trim()) return;
+    setHy2Loading(true);
+    try {
+      await api.post('/scripts/hysteria2/create-profile', {
+        sshNodeId: hy2Dialog.sshNodeId,
+        profileName: hy2ProfileName.trim(),
+        domain: hy2Domain.trim(),
+      });
+      showMsg('success', `Профиль "${hy2ProfileName.trim()}" создан и назначен на ноду`);
+      setHy2Dialog(null);
+    } catch (e: any) {
+      showMsg('error', e?.response?.data?.message || 'Ошибка создания профиля');
+    } finally {
+      setHy2Loading(false);
+    }
+  };
 
   // ── Confirm dialogs ───────────────────────────────────────────────────────
   const [confirmDel, setConfirmDel] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void }>({ open: false, title: '', message: '', onConfirm: () => {} });
@@ -2509,6 +2533,17 @@ export default function ScriptsPage() {
         }}>
           <OpenInNew sx={{ fontSize: 16, mr: 1 }} />Открыть терминал в окне
         </MenuItem>
+        <MenuItem onClick={() => {
+          const { nodeId, nodeName } = nodeRowMenu || {};
+          setNodeRowMenu(null);
+          if (nodeId && nodeName) {
+            setHy2ProfileName('');
+            setHy2Domain('');
+            setHy2Dialog({ open: true, sshNodeId: nodeId, sshNodeName: nodeName });
+          }
+        }}>
+          <Security sx={{ fontSize: 16, mr: 1 }} />Создать профиль Hysteria2
+        </MenuItem>
         <MenuItem sx={{ color: 'error.main' }} onClick={() => {
           const { nodeId, nodeName } = nodeRowMenu || {};
           setNodeRowMenu(null);
@@ -2534,6 +2569,52 @@ export default function ScriptsPage() {
           <Delete sx={{ fontSize: 16, mr: 1 }} />Удалить
         </MenuItem>
       </Menu>
+
+      {/* Hysteria2 profile creation dialog */}
+      <Dialog open={Boolean(hy2Dialog?.open)} onClose={() => !hy2Loading && setHy2Dialog(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Security color="primary" />
+            <Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Создать профиль Hysteria2</Typography>
+              <Typography variant="caption" color="text.secondary">{hy2Dialog?.sshNodeName}</Typography>
+            </Box>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <TextField
+              fullWidth size="small" label="Название профиля"
+              value={hy2ProfileName} onChange={e => setHy2ProfileName(e.target.value)}
+              helperText="Отображается в Remnawave"
+              autoFocus
+            />
+            <TextField
+              fullWidth size="small" label="Домен"
+              value={hy2Domain} onChange={e => setHy2Domain(e.target.value)}
+              helperText="Тот же домен, что использовался при получении сертификата"
+              placeholder="node1.example.com"
+            />
+            <Box sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Будет создан конфиг профиль Hysteria2 в Remnawave и назначен на эту ноду.
+                Убедитесь, что сертификат Let's Encrypt уже получен для данного домена.
+              </Typography>
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setHy2Dialog(null)} disabled={hy2Loading}>Отмена</Button>
+          <Button
+            variant="contained"
+            onClick={handleCreateHysteria2Profile}
+            disabled={hy2Loading || !hy2ProfileName.trim() || !hy2Domain.trim()}
+            startIcon={hy2Loading ? <CircularProgress size={16} /> : <Security />}
+          >
+            Создать профиль
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <ConfirmDialog
         open={confirmDel.open}

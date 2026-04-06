@@ -7,6 +7,7 @@ import { Setting } from '../settings/entities/setting.entity';
 import type { InstallNodeDto } from '../nodes/nodes.service';
 import { SYSCTL_CONTENT } from '../config/constants';
 import { TelegramService } from '../telegram/telegram.service';
+import { RemnavaveService } from '../remnawave/remnawave.service';
 
 export interface SshNode {
   id: string;
@@ -310,6 +311,177 @@ df -h /
 docker system df 2>/dev/null
 echo "Готово"`,
   },
+  {
+    id: 'builtin-setup-hysteria2-cert',
+    name: 'Настройка сертификата (Hysteria2 / TLS)',
+    description: 'Получает Let\'s Encrypt сертификат через Certbot (Docker), монтирует его в remnanode и настраивает автообновление через cron',
+    isBuiltIn: true,
+    content: `DOMAIN="{{ domain | Домен ноды (например: node1.example.com) }}"
+EMAIL="{{ email | Email для Let's Encrypt (например: admin@example.com) }}"
+
+echo "================================================================"
+echo "  Настройка TLS-сертификата Let's Encrypt"
+echo "  Домен: $DOMAIN"
+echo "================================================================"
+echo ""
+
+[ -z "$DOMAIN" ] && { echo "[ERROR] Домен не задан"; exit 1; }
+[ -z "$EMAIL" ]  && { echo "[ERROR] Email не задан";  exit 1; }
+
+echo "=== Проверка порта 80 ==="
+if ss -tlnp 2>/dev/null | grep -q ':80 '; then
+  echo "[WARN] Порт 80 занят — certbot может не пройти HTTP-проверку:"
+  ss -tlnp | grep ':80'
+  echo "Если сертификат не получится, остановите сервис на порту 80 и повторите."
+else
+  echo "Порт 80 свободен"
+fi
+echo ""
+
+echo "=== Подготовка /opt/certbot ==="
+mkdir -p /opt/certbot/certs /opt/certbot/var-lib-letsencrypt
+cat > /opt/certbot/docker-compose.yml << 'CEOF'
+services:
+  certbot:
+    container_name: certbot
+    image: certbot/certbot
+    network_mode: host
+    volumes:
+      - ./certs:/etc/letsencrypt
+CEOF
+echo "Директория и docker-compose.yml созданы"
+echo ""
+
+CERT_FILE="/opt/certbot/certs/live/\${DOMAIN}/fullchain.pem"
+
+if [ -f "$CERT_FILE" ]; then
+  echo "=== Сертификат уже существует ==="
+  openssl x509 -noout -subject -dates -in "$CERT_FILE" 2>/dev/null || true
+else
+  echo "=== Получение сертификата для $DOMAIN ==="
+  docker run --rm \\
+    -v /opt/certbot/certs:/etc/letsencrypt \\
+    -v /opt/certbot/var-lib-letsencrypt:/var/lib/letsencrypt \\
+    --network host \\
+    certbot/certbot certonly --standalone \\
+    --non-interactive --agree-tos \\
+    --email "\${EMAIL}" \\
+    -d "\${DOMAIN}"
+
+  if [ $? -ne 0 ]; then
+    echo ""
+    echo "[ERROR] Certbot завершился с ошибкой"
+    echo "Проверьте:"
+    echo "  1. DNS для $DOMAIN указывает на IP этого сервера"
+    echo "  2. Порт 80 открыт в файрволе (ufw allow 80)"
+    echo "  3. На порту 80 нет других сервисов"
+    exit 1
+  fi
+
+  echo ""
+  echo "Сертификат получен"
+  openssl x509 -noout -subject -dates -in "$CERT_FILE" 2>/dev/null || true
+fi
+echo ""
+
+echo "=== Настройка монтирования в remnanode ==="
+COMPOSE_FILE="/opt/remnanode/docker-compose.yml"
+
+if [ ! -f "$COMPOSE_FILE" ]; then
+  echo "[ERROR] Файл $COMPOSE_FILE не найден"
+  echo "Убедитесь, что нода установлена в /opt/remnanode"
+  exit 1
+fi
+
+if grep -q "certbot/certs" "$COMPOSE_FILE"; then
+  echo "Монтирование уже настроено"
+else
+  cat > /tmp/_rwm_add_vol.py << 'PYEOF'
+import re, sys
+
+path = sys.argv[1]
+new_vol = "      - '/opt/certbot/certs:/etc/letsencrypt:ro'\\n"
+
+with open(path, 'r') as f:
+    lines = f.readlines()
+
+if any('certbot/certs' in l for l in lines):
+    print('Already present')
+    sys.exit(0)
+
+result = list(lines)
+in_vol = False
+insert_after = -1
+
+for i, line in enumerate(lines):
+    s = line.strip()
+    if re.match(r'\\s+volumes\\s*:', line):
+        in_vol = True
+    elif in_vol:
+        if s.startswith('-'):
+            insert_after = i
+        elif s and not s.startswith('#') and not s.startswith('-'):
+            in_vol = False
+
+if insert_after >= 0:
+    result.insert(insert_after + 1, new_vol)
+    with open(path, 'w') as f:
+        f.writelines(result)
+    print('Том добавлен')
+else:
+    for i, line in enumerate(lines):
+        if re.match(r'\\s+volumes\\s*:', line):
+            result.insert(i + 1, new_vol)
+            with open(path, 'w') as f:
+                f.writelines(result)
+            print('Том добавлен')
+            sys.exit(0)
+    print('[ERROR] Секция volumes не найдена')
+    sys.exit(1)
+PYEOF
+
+  if command -v python3 &>/dev/null; then
+    python3 /tmp/_rwm_add_vol.py "$COMPOSE_FILE"
+  else
+    sed -i "/^\\s*volumes:/a\\\\      - '/opt/certbot/certs:/etc/letsencrypt:ro'" "$COMPOSE_FILE"
+    echo "Том добавлен (sed)"
+  fi
+  rm -f /tmp/_rwm_add_vol.py
+fi
+echo ""
+
+echo "=== Перезапуск remnanode ==="
+cd /opt/remnanode && docker compose down && docker compose up -d
+if [ $? -ne 0 ]; then
+  echo "[ERROR] Не удалось перезапустить контейнер"
+  exit 1
+fi
+echo ""
+
+echo "=== Автообновление сертификата ==="
+CRON_JOB="0 0 28 * * cd /opt/certbot && docker compose run --rm certbot renew >> /var/log/certbot-renew.log 2>&1"
+
+if crontab -l 2>/dev/null | grep -q "certbot renew"; then
+  echo "Cron-задача уже существует"
+else
+  (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+  echo "Cron-задача добавлена: 28-го числа каждого месяца в 00:00"
+fi
+echo ""
+
+echo "================================================================"
+echo "  ГОТОВО — сертификат настроен"
+echo "================================================================"
+echo ""
+echo "Домен:   $DOMAIN"
+echo "Папка:   /opt/certbot/certs/live/$DOMAIN/"
+echo ""
+echo "Пути сертификатов внутри контейнера remnanode:"
+echo "  cert:  /etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+echo "  key:   /etc/letsencrypt/live/$DOMAIN/privkey.pem"
+echo ""
+echo "Используйте эти пути при настройке Hysteria2 в конфиге ноды."`,
+  },
 ];
 
 @Injectable()
@@ -321,6 +493,7 @@ export class ScriptsService implements OnModuleInit {
     @InjectRepository(Setting)
     private settingRepo: Repository<Setting>,
     private telegramService: TelegramService,
+    private remnavaveService: RemnavaveService,
   ) {}
 
   async onModuleInit() {
@@ -816,5 +989,63 @@ export class ScriptsService implements OnModuleInit {
       }
       conn.connect(connectOptions);
     });
+  }
+
+  // ── Hysteria2 profile ─────────────────────────────────────────────────────────
+
+  async createHysteria2Profile(sshNodeId: string, profileName: string, domain: string): Promise<{ profileUuid: string }> {
+    const nodes = await this.getSshNodes();
+    const node = nodes.find(n => n.id === sshNodeId);
+    if (!node) throw new Error('Нода не найдена');
+    if (!node.rwNodeUuid) throw new Error('Нода не привязана к Remnawave-ноде. Установите ноду через мастер установки.');
+
+    const config = {
+      log: { loglevel: 'none' },
+      inbounds: [
+        {
+          tag: 'HYSTERIA2-BBR',
+          port: 443,
+          listen: '0.0.0.0',
+          protocol: 'hysteria',
+          settings: { clients: [], version: 2 },
+          streamSettings: {
+            network: 'hysteria',
+            security: 'tls',
+            finalmask: { quicParams: { debug: false, congestion: 'bbr' } },
+            tlsSettings: {
+              alpn: ['h3'],
+              certificates: [
+                {
+                  keyFile: `/etc/letsencrypt/live/${domain}/privkey.pem`,
+                  certificateFile: `/etc/letsencrypt/live/${domain}/fullchain.pem`,
+                },
+              ],
+            },
+            hysteriaSettings: { version: 2 },
+          },
+        },
+      ],
+      outbounds: [
+        { tag: 'DIRECT', protocol: 'freedom' },
+        { tag: 'BLOCK', protocol: 'blackhole' },
+      ],
+      routing: {
+        rules: [
+          { ip: ['geoip:private'], outboundTag: 'BLOCK' },
+          { domain: ['geosite:private'], outboundTag: 'BLOCK' },
+          { protocol: ['bittorrent'], outboundTag: 'BLOCK' },
+        ],
+      },
+    };
+
+    const profile = await this.remnavaveService.createConfigProfile(profileName, config);
+    const profileUuid: string = profile.uuid;
+    const inboundUuids: string[] = (profile.inbounds || []).map((i: any) => i.uuid).filter(Boolean);
+
+    if (inboundUuids.length > 0) {
+      await this.remnavaveService.applyProfileToNode(node.rwNodeUuid, profileUuid, inboundUuids);
+    }
+
+    return { profileUuid };
   }
 }

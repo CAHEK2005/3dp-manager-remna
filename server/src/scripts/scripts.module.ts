@@ -4,9 +4,10 @@ import { Setting } from '../settings/entities/setting.entity';
 import { ScriptsController } from './scripts.controller';
 import { ScriptsService } from './scripts.service';
 import { TelegramModule } from '../telegram/telegram.module';
+import { RemnavaveModule } from '../remnawave/remnawave.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Setting]), TelegramModule],
+  imports: [TypeOrmModule.forFeature([Setting]), TelegramModule, RemnavaveModule],
   controllers: [ScriptsController],
   providers: [ScriptsService],
   exports: [ScriptsService],
