@@ -74,7 +74,10 @@ describe('ScriptsService built-in scripts', () => {
     );
 
     expect(variables).toEqual(['hysteria_domain', 'certbot_email']);
-    expect(script.content).toContain('certbot certonly');
+    expect(script.content).toContain(
+      'run_certbot_bounded 10m "Получение сертификата Let\'s Encrypt"',
+    );
+    expect(script.content).toContain('\n  certonly \\');
     expect(script.content).toContain('--webroot');
     expect(script.content).toContain('--webroot-path /var/www/certbot');
     expect(script.content).toContain(
@@ -87,17 +90,23 @@ describe('ScriptsService built-in scripts', () => {
       '/opt/certbot/certs:/etc/letsencrypt:ro',
     );
     expect(script.content).toContain('docker-compose.override.yml');
-    expect(script.content).toContain('certbot reconfigure');
+    expect(script.content).toContain(
+      'run_certbot_bounded 10m "Перенастройка Certbot lineage"',
+    );
+    expect(script.content).toContain('\n    reconfigure \\');
     expect(script.content).toContain('--authenticator webroot');
     expect(script.content).toContain(
       'backup_file "$CERTBOT_RENEWAL_CONF" certbot-renewal-conf',
     );
     expect(script.content).toContain(
-      'cp -p "$STAGE_DIR/backup-certbot-renewal-conf" "$CERTBOT_RENEWAL_CONF"',
+      'restore_file "$CERTBOT_RENEWAL_CONF" certbot-renewal-conf',
     );
+    expect(HYSTERIA2_RENEW_SCRIPT).toContain('renew --quiet');
+    expect(HYSTERIA2_RENEW_SCRIPT).toContain('--cert-name "$HYSTERIA_DOMAIN"');
     expect(HYSTERIA2_RENEW_SCRIPT).toContain(
-      'renew --quiet --cert-name "$HYSTERIA_DOMAIN"',
+      'timeout --foreground --kill-after=30s 15m',
     );
+    expect(HYSTERIA2_RENEW_SCRIPT).toContain('--no-random-sleep-on-renew');
     expect(HYSTERIA2_RENEW_SCRIPT).toContain('ensure-caddy-webroot.sh');
     expect(
       HYSTERIA2_RENEW_SCRIPT.indexOf('ensure-caddy-webroot.sh'),

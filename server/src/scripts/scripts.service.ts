@@ -9,6 +9,8 @@ import { TelegramService } from '../telegram/telegram.service';
 import { randomId } from '../common/random-id';
 import { SecretsService } from '../secrets/secrets.service';
 import {
+  HYSTERIA2_RECONFIGURE_SCRIPT,
+  HYSTERIA2_RECONFIGURE_SCRIPT_ID,
   HYSTERIA2_SCRIPT_ID,
   HYSTERIA2_SETUP_SCRIPT,
 } from './hysteria2-script';
@@ -233,6 +235,14 @@ cd /opt/remnanode && docker compose up -d --force-recreate`,
     content: HYSTERIA2_SETUP_SCRIPT,
   },
   {
+    id: HYSTERIA2_RECONFIGURE_SCRIPT_ID,
+    name: 'Смена домена Hysteria2',
+    description:
+      "Перевыпускает сертификат Let's Encrypt для нового домена и безопасно переключает работающую Remnawave Node",
+    isBuiltIn: true,
+    content: HYSTERIA2_RECONFIGURE_SCRIPT,
+  },
+  {
     id: 'builtin-setup-ssh-key',
     name: 'Настройка SSH-ключа',
     description:
@@ -403,17 +413,26 @@ export class ScriptsService implements OnModuleInit {
     script: Script,
     variables: Record<string, string>,
   ): void {
-    if (script.id !== HYSTERIA2_SCRIPT_ID) return;
+    if (
+      script.id !== HYSTERIA2_SCRIPT_ID &&
+      script.id !== HYSTERIA2_RECONFIGURE_SCRIPT_ID
+    ) {
+      return;
+    }
 
     const needsDomain = /\{\{\s*hysteria_domain(?:\s*\||\s*\}\})/.test(
+      script.content,
+    );
+    const needsNewDomain = /\{\{\s*hysteria_new_domain(?:\s*\||\s*\}\})/.test(
       script.content,
     );
     const needsEmail = /\{\{\s*certbot_email(?:\s*\||\s*\}\})/.test(
       script.content,
     );
-    if (!needsDomain && !needsEmail) return;
+    if (!needsDomain && !needsNewDomain && !needsEmail) return;
 
     const domain = variables.hysteria_domain;
+    const newDomain = variables.hysteria_new_domain;
     const email = variables.certbot_email;
 
     if (
@@ -422,6 +441,15 @@ export class ScriptsService implements OnModuleInit {
     ) {
       throw new Error(
         'Некорректный домен Hysteria2. Укажите доменное имя в нижнем регистре (ASCII/Punycode), без схемы, пути и wildcard.',
+      );
+    }
+
+    if (
+      needsNewDomain &&
+      (typeof newDomain !== 'string' || !this.isValidHostname(newDomain))
+    ) {
+      throw new Error(
+        'Некорректный новый домен Hysteria2. Укажите доменное имя в нижнем регистре (ASCII/Punycode), без схемы, пути и wildcard.',
       );
     }
 

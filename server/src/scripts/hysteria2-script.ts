@@ -1,4 +1,11 @@
 export const HYSTERIA2_SCRIPT_ID = 'builtin-setup-hysteria2';
+export const HYSTERIA2_RECONFIGURE_SCRIPT_ID =
+  'builtin-reconfigure-hysteria2-domain';
+
+const HYSTERIA2_DOMAIN_INPUT =
+  '{{ hysteria_domain | Домен Hysteria2 (только A-запись на эту ноду) }}';
+const HYSTERIA2_NEW_DOMAIN_INPUT =
+  '{{ hysteria_new_domain | Новый домен Hysteria2 (только A-запись на эту ноду) }}';
 
 export const HYSTERIA2_CADDY_HELPER_SCRIPT = `#!/usr/bin/env bash
 set -Eeuo pipefail
@@ -368,14 +375,31 @@ exec 9>/run/lock/rwm-hysteria2.lock
 flock -n 9 || exit 0
 
 /opt/certbot/ensure-caddy-webroot.sh
-docker compose -f /opt/certbot/docker-compose.hysteria2.yml \\
-  run --rm -T certbot renew --quiet --cert-name "$HYSTERIA_DOMAIN" </dev/null
+RENEW_STATUS=0
+timeout --foreground --kill-after=30s 15m \\
+  docker compose --progress plain \\
+  -f /opt/certbot/docker-compose.hysteria2.yml \\
+  run --rm -T certbot renew --quiet \\
+  --cert-name "$HYSTERIA_DOMAIN" \\
+  --no-random-sleep-on-renew </dev/null \\
+  || RENEW_STATUS=$?
+case "$RENEW_STATUS" in
+  0) ;;
+  124|137)
+    echo "[ERROR] Certbot renew не завершился за 15 минут" >&2
+    exit 1
+    ;;
+  *)
+    echo "[ERROR] Certbot renew завершился с кодом $RENEW_STATUS" >&2
+    exit "$RENEW_STATUS"
+    ;;
+esac
 /opt/certbot/deploy-hysteria2-cert.sh`;
 
 export const HYSTERIA2_SETUP_SCRIPT = `set -Eeuo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-HYSTERIA_DOMAIN="{{ hysteria_domain | Домен Hysteria2 (только A-запись на эту ноду) }}"
+HYSTERIA_DOMAIN="${HYSTERIA2_DOMAIN_INPUT}"
 CERTBOT_EMAIL="{{ certbot_email | Email для Let's Encrypt }}"
 
 CERTBOT_DIR="/opt/certbot"
@@ -386,6 +410,11 @@ CERTBOT_DEPLOY="$CERTBOT_DIR/deploy-hysteria2-cert.sh"
 CERTBOT_RENEW="$CERTBOT_DIR/renew-hysteria2.sh"
 CERTBOT_RENEWAL_CONF="$CERTBOT_DIR/certs/renewal/$HYSTERIA_DOMAIN.conf"
 CERTBOT_IMAGE="certbot/certbot:v5.7.0"
+LINEAGE_MARKER_DIR="$CERTBOT_DIR/rwm-hysteria2-lineages"
+LINEAGE_MARKER="$LINEAGE_MARKER_DIR/$HYSTERIA_DOMAIN"
+HYSTERIA_REQUIRE_MANAGED_LINEAGE="\${HYSTERIA_REQUIRE_MANAGED_LINEAGE:-0}"
+HYSTERIA_RECONFIGURE_MODE="\${HYSTERIA_RECONFIGURE_MODE:-0}"
+HYSTERIA_PREVIOUS_DOMAIN_FOR_RECOVERY="\${HYSTERIA_PREVIOUS_DOMAIN_FOR_RECOVERY:-}"
 CERT_DEPLOY_DIR="/opt/hysteria2-certs"
 CERT_MOUNT_SOURCE="$CERT_DEPLOY_DIR/current"
 RESTART_MARKER="$CERTBOT_DIR/.hysteria2-restart-required"
@@ -404,10 +433,193 @@ STAGE_DIR=""
 TRANSACTION_ACTIVE=0
 CADDY_RESTORE_NEEDED=0
 REMNANODE_RESTORE_NEEDED=0
+ROLLBACK_FAILED=0
+ROLLBACK_HAD_CURRENT=0
+ROLLBACK_CURRENT_TARGET=""
+ROLLBACK_HYSTERIA_DOMAIN="$HYSTERIA_DOMAIN"
+ROLLBACK_CERT_HASH=""
+ROLLBACK_KEY_HASH=""
 
 fail() {
   echo "[ERROR] $*" >&2
   exit 1
+}
+
+is_valid_hostname() {
+  local value="$1"
+  local label=""
+  local labels=()
+
+  [ "\${#value}" -ge 3 ] && [ "\${#value}" -le 253 ] || return 1
+  [ "$value" = "\${value,,}" ] || return 1
+  [[ "$value" != *..* && "$value" == *.* ]] || return 1
+  IFS='.' read -r -a labels <<< "$value"
+  for label in "\${labels[@]}"; do
+    [ "\${#label}" -ge 1 ] && [ "\${#label}" -le 63 ] || return 1
+    [[ "$label" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || return 1
+  done
+}
+
+certificate_has_exact_dns_san() {
+  local certificate="$1"
+  local expected_domain="$2"
+  local san_domains=""
+
+  san_domains=$(
+    openssl x509 -in "$certificate" -noout -ext subjectAltName 2>/dev/null \\
+      | grep -oE 'DNS:[^,[:space:]]+' \\
+      | sed 's/^DNS://' \\
+      | sort -u
+  ) || return 1
+  [ "$san_domains" = "$expected_domain" ]
+}
+
+lineage_marker_is_valid() {
+  local marker_mode=""
+
+  [ -f "$LINEAGE_MARKER" ] && [ ! -L "$LINEAGE_MARKER" ] || return 1
+  [ "$(stat -c '%u' "$LINEAGE_MARKER")" -eq 0 ] || return 1
+  marker_mode=$(stat -c '%a' "$LINEAGE_MARKER") || return 1
+  (( (8#$marker_mode & 8#022) == 0 )) || return 1
+  [ "$(cat "$LINEAGE_MARKER")" = "$HYSTERIA_DOMAIN" ]
+}
+
+reserve_lineage_marker() {
+  local marker_tmp=""
+
+  if [ -e "$LINEAGE_MARKER_DIR" ]; then
+    [ -d "$LINEAGE_MARKER_DIR" ] && [ ! -L "$LINEAGE_MARKER_DIR" ] \\
+      || fail "$LINEAGE_MARKER_DIR имеет небезопасный тип"
+    [ "$(stat -c '%u' "$LINEAGE_MARKER_DIR")" -eq 0 ] \\
+      || fail "$LINEAGE_MARKER_DIR не принадлежит root"
+  fi
+  install -d -o root -g root -m 700 "$LINEAGE_MARKER_DIR"
+  if [ -e "$LINEAGE_MARKER" ] || [ -L "$LINEAGE_MARKER" ]; then
+    lineage_marker_is_valid \\
+      || fail "Маркер Certbot lineage для $HYSTERIA_DOMAIN повреждён или небезопасен"
+    return 0
+  fi
+
+  marker_tmp=$(mktemp "$LINEAGE_MARKER_DIR/.marker.XXXXXX")
+  printf '%s\\n' "$HYSTERIA_DOMAIN" > "$marker_tmp"
+  chown root:root "$marker_tmp"
+  chmod 600 "$marker_tmp"
+  mv -Tf "$marker_tmp" "$LINEAGE_MARKER"
+}
+
+run_certbot_bounded() {
+  local timeout_value="$1"
+  local operation="$2"
+  local certbot_status=0
+  shift 2
+
+  timeout --foreground --kill-after=30s "$timeout_value" \\
+    docker compose --progress plain \\
+    -f "$STAGE_DIR/docker-compose.hysteria2.yml" \\
+    run --rm -T certbot "$@" </dev/null \\
+    || certbot_status=$?
+  case "$certbot_status" in
+    0) ;;
+    124|137) fail "$operation не завершилась за $timeout_value" ;;
+    *) fail "$operation завершилась с кодом $certbot_status" ;;
+  esac
+}
+
+atomic_install() {
+  local source_path="$1"
+  local target_path="$2"
+  local target_mode="$3"
+  local target_dir=""
+  local install_tmp=""
+
+  target_dir=$(dirname "$target_path")
+  install_tmp=$(mktemp "$target_dir/.rwm-install.XXXXXX")
+  if ! install -o root -g root -m "$target_mode" "$source_path" "$install_tmp" \\
+    || ! sync -f "$install_tmp" \\
+    || ! mv -Tf "$install_tmp" "$target_path" \\
+    || ! sync -f "$target_path"; then
+    rm -f "$install_tmp"
+    return 1
+  fi
+}
+
+publish_runtime_configuration() {
+  atomic_install "$STAGE_DIR/ensure-caddy-webroot.sh" "$CERTBOT_HELPER" 750 \\
+    || fail "Не удалось атомарно установить Caddy helper"
+  atomic_install "$STAGE_DIR/deploy-hysteria2-cert.sh" "$CERTBOT_DEPLOY" 750 \\
+    || fail "Не удалось атомарно установить deploy helper"
+  atomic_install "$STAGE_DIR/renew-hysteria2.sh" "$CERTBOT_RENEW" 750 \\
+    || fail "Не удалось атомарно установить renewal helper"
+  atomic_install "$STAGE_DIR/docker-compose.hysteria2.yml" "$CERTBOT_COMPOSE" 644 \\
+    || fail "Не удалось атомарно установить Certbot compose"
+  atomic_install "$STAGE_DIR/rwm-hysteria2-certbot.cron" "$CRON_FILE" 644 \\
+    || fail "Не удалось атомарно установить cron"
+  # env — commit point для cron: он видит целиком старое либо целиком новое состояние.
+  atomic_install "$STAGE_DIR/hysteria2.env" "$CERTBOT_ENV" 600 \\
+    || fail "Не удалось атомарно установить Hysteria2 env"
+}
+
+verify_remnanode_certificate_mount() {
+  local expected_domain="$1"
+  local expected_source="$2"
+  local expected_real_source=""
+  local remnanode_cid=""
+  local cert_file=""
+  local host_hash=""
+  local container_hash=""
+
+  expected_real_source=$(readlink -f "$expected_source") || return 1
+  [ -d "$expected_real_source" ] || return 1
+  remnanode_cid=$(cd "$REMNANODE_DIR" \\
+    && timeout --foreground --kill-after=5s 20s \\
+      docker compose ps -q remnanode) \\
+    || return 1
+  [ -n "$remnanode_cid" ] || return 1
+
+  timeout --foreground --kill-after=5s 20s \\
+    docker inspect "$remnanode_cid" | jq -e \\
+    --arg source "$expected_source" \\
+    --arg realSource "$expected_real_source" '
+      .[0].State.Running == true
+      and (
+        [.[0].Mounts[]? | select(
+          .Destination == "/etc/hysteria2"
+          and (.Source == $source or .Source == $realSource)
+          and .RW == false
+        )] | length
+      ) == 1
+    ' >/dev/null || return 1
+
+  for cert_file in fullchain.pem privkey.pem; do
+    host_hash=$(sha256sum "$expected_source/$cert_file" | awk '{ print $1 }') \\
+      || return 1
+    container_hash=$(
+      (
+        cd "$REMNANODE_DIR" \\
+          && timeout --foreground --kill-after=5s 20s \\
+            docker compose exec -T --interactive=false remnanode \\
+            cat "/etc/hysteria2/$cert_file" </dev/null
+      ) | sha256sum | awk '{ print $1 }'
+    ) || return 1
+    [ -n "$host_hash" ] && [ "$host_hash" = "$container_hash" ] || return 1
+  done
+
+  openssl x509 -in "$expected_source/fullchain.pem" \\
+    -checkhost "$expected_domain" -noout >/dev/null 2>&1
+}
+
+verify_remnanode_certificate_mount_with_retry() {
+  local expected_domain="$1"
+  local expected_source="$2"
+  local attempt=0
+
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if verify_remnanode_certificate_mount "$expected_domain" "$expected_source"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 backup_file() {
@@ -420,59 +632,98 @@ backup_file() {
 }
 
 restore_file() {
-  TARGET_PATH="$1"
-  BACKUP_NAME="$2"
-  if [ -f "$STAGE_DIR/backup-$BACKUP_NAME.exists" ]; then
-    cp -p "$STAGE_DIR/backup-$BACKUP_NAME" "$TARGET_PATH"
+  local target_path="$1"
+  local backup_name="$2"
+  local target_dir=""
+  local restore_tmp=""
+
+  if [ -f "$STAGE_DIR/backup-$backup_name.exists" ]; then
+    target_dir=$(dirname "$target_path")
+    restore_tmp=$(mktemp "$target_dir/.rwm-restore.XXXXXX") || return 1
+    if ! cp -p "$STAGE_DIR/backup-$backup_name" "$restore_tmp" \\
+      || ! mv -Tf "$restore_tmp" "$target_path"; then
+      rm -f "$restore_tmp"
+      return 1
+    fi
   else
-    rm -f "$TARGET_PATH"
+    rm -f "$target_path"
   fi
 }
 
 rollback_transaction() {
   echo "[ROLLBACK] Возвращаем предыдущую рабочую конфигурацию Hysteria2"
+  ROLLBACK_FAILED=0
 
-  restore_file "$CERTBOT_ENV" certbot-env
-  restore_file "$CERTBOT_COMPOSE" certbot-compose
-  restore_file "$CERTBOT_HELPER" caddy-helper
-  restore_file "$CERTBOT_DEPLOY" deploy-script
-  restore_file "$CERTBOT_RENEW" renew-script
-  restore_file "$CRON_FILE" cron
-  restore_file "$REMNANODE_OVERRIDE" remnanode-override
-  restore_file "$RESTART_MARKER" restart-marker
+  restore_file "$CERTBOT_ENV" certbot-env || ROLLBACK_FAILED=1
+  restore_file "$CERTBOT_COMPOSE" certbot-compose || ROLLBACK_FAILED=1
+  restore_file "$CERTBOT_HELPER" caddy-helper || ROLLBACK_FAILED=1
+  restore_file "$CERTBOT_DEPLOY" deploy-script || ROLLBACK_FAILED=1
+  restore_file "$CERTBOT_RENEW" renew-script || ROLLBACK_FAILED=1
+  restore_file "$CRON_FILE" cron || ROLLBACK_FAILED=1
+  restore_file "$REMNANODE_OVERRIDE" remnanode-override || ROLLBACK_FAILED=1
+  restore_file "$RESTART_MARKER" restart-marker || ROLLBACK_FAILED=1
   if [ -f "$STAGE_DIR/backup-certbot-renewal-conf.exists" ]; then
-    cp -p "$STAGE_DIR/backup-certbot-renewal-conf" "$CERTBOT_RENEWAL_CONF"
+    restore_file "$CERTBOT_RENEWAL_CONF" certbot-renewal-conf \\
+      || ROLLBACK_FAILED=1
   fi
 
   if [ -f "$STAGE_DIR/deploy-dir.exists" ]; then
-    install -d -m 700 "$CERT_DEPLOY_DIR"
+    install -d -m 700 "$CERT_DEPLOY_DIR" || ROLLBACK_FAILED=1
     if [ -L "$STAGE_DIR/deploy-dir.before/current" ]; then
-      OLD_CURRENT_TARGET=$(readlink "$STAGE_DIR/deploy-dir.before/current")
+      OLD_CURRENT_TARGET=$(readlink "$STAGE_DIR/deploy-dir.before/current") \\
+        || ROLLBACK_FAILED=1
       OLD_CURRENT_TMP="$CERT_DEPLOY_DIR/.current.rollback.$$"
-      rm -f "$OLD_CURRENT_TMP"
-      ln -s "$OLD_CURRENT_TARGET" "$OLD_CURRENT_TMP"
-      mv -Tf "$OLD_CURRENT_TMP" "$CERT_DEPLOY_DIR/current"
+      rm -f "$OLD_CURRENT_TMP" || ROLLBACK_FAILED=1
+      if ! ln -s "$OLD_CURRENT_TARGET" "$OLD_CURRENT_TMP" \\
+        || ! mv -Tf "$OLD_CURRENT_TMP" "$CERT_DEPLOY_DIR/current"; then
+        rm -f "$OLD_CURRENT_TMP"
+        ROLLBACK_FAILED=1
+      fi
     elif [ ! -e "$STAGE_DIR/deploy-dir.before/current" ]; then
-      rm -f "$CERT_DEPLOY_DIR/current"
+      rm -f "$CERT_DEPLOY_DIR/current" || ROLLBACK_FAILED=1
     fi
   else
-    rm -rf "$CERT_DEPLOY_DIR"
+    rm -rf "$CERT_DEPLOY_DIR" || ROLLBACK_FAILED=1
+  fi
+
+  if [ "$ROLLBACK_HAD_CURRENT" -eq 1 ]; then
+    [ -L "$CERT_MOUNT_SOURCE" ] \\
+      && [ "$(readlink "$CERT_MOUNT_SOURCE")" = "$ROLLBACK_CURRENT_TARGET" ] \\
+      && [ "$(sha256sum "$CERT_MOUNT_SOURCE/fullchain.pem" | awk '{ print $1 }')" = "$ROLLBACK_CERT_HASH" ] \\
+      && [ "$(sha256sum "$CERT_MOUNT_SOURCE/privkey.pem" | awk '{ print $1 }')" = "$ROLLBACK_KEY_HASH" ] \\
+      && openssl x509 -in "$CERT_MOUNT_SOURCE/fullchain.pem" \\
+        -checkhost "$ROLLBACK_HYSTERIA_DOMAIN" -noout >/dev/null 2>&1 \\
+      || ROLLBACK_FAILED=1
   fi
 
   if [ "$CADDY_RESTORE_NEEDED" -eq 1 ] \\
     && [ -f "$STAGE_DIR/backup-caddyfile.exists" ]; then
-    cat "$STAGE_DIR/backup-caddyfile" > "$CADDY_FILE"
-    docker compose -f "$CADDY_COMPOSE" up -d --force-recreate caddy \\
-      >/dev/null 2>&1 || true
+    if ! cat "$STAGE_DIR/backup-caddyfile" > "$CADDY_FILE" \\
+      || ! docker compose -f "$CADDY_COMPOSE" up -d --force-recreate caddy \\
+        >/dev/null 2>&1; then
+      ROLLBACK_FAILED=1
+    fi
   fi
 
   if [ "$REMNANODE_RESTORE_NEEDED" -eq 1 ]; then
     if ! (cd "$REMNANODE_DIR" && docker compose up -d --force-recreate remnanode) \\
       >/dev/null 2>&1; then
       echo "[ROLLBACK ERROR] Не удалось пересоздать remnanode со старой конфигурацией" >&2
-      touch "$RESTART_MARKER"
+      ROLLBACK_FAILED=1
+    elif [ "$ROLLBACK_HAD_CURRENT" -eq 1 ] \\
+      && ! verify_remnanode_certificate_mount_with_retry \\
+        "$ROLLBACK_HYSTERIA_DOMAIN" "$CERT_MOUNT_SOURCE"; then
+      echo "[ROLLBACK ERROR] remnanode не подтверждён на старом сертификате" >&2
+      ROLLBACK_FAILED=1
     fi
   fi
+
+  if [ "$ROLLBACK_FAILED" -ne 0 ]; then
+    touch "$RESTART_MARKER" 2>/dev/null || true
+    echo "[ROLLBACK ERROR] Автоматический откат неполон; требуется ручная проверка" >&2
+    return 1
+  fi
+  echo "[ROLLBACK] Предыдущая конфигурация подтверждена"
 }
 
 on_exit() {
@@ -487,7 +738,7 @@ on_exit() {
       down --remove-orphans --timeout 10 >/dev/null 2>&1 || true
   fi
   if [ "$EXIT_CODE" -ne 0 ] && [ "$TRANSACTION_ACTIVE" -eq 1 ]; then
-    rollback_transaction
+    rollback_transaction || EXIT_CODE=1
   fi
   if [ -n "$STAGE_DIR" ] && [ -d "$STAGE_DIR" ]; then
     rm -rf "$STAGE_DIR"
@@ -503,6 +754,20 @@ command -v curl >/dev/null 2>&1 || fail "curl не установлен"
 docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin не установлен"
 [ -f /etc/debian_version ] \\
   || fail "Автоматическая установка поддерживает только Debian и Ubuntu"
+is_valid_hostname "$HYSTERIA_DOMAIN" \\
+  || fail "Домен Hysteria2 некорректен"
+case "$HYSTERIA_REQUIRE_MANAGED_LINEAGE" in
+  0|1) ;;
+  *) fail "HYSTERIA_REQUIRE_MANAGED_LINEAGE должен быть 0 или 1" ;;
+esac
+case "$HYSTERIA_RECONFIGURE_MODE" in
+  0|1) ;;
+  *) fail "HYSTERIA_RECONFIGURE_MODE должен быть 0 или 1" ;;
+esac
+if [ "$HYSTERIA_RECONFIGURE_MODE" -eq 1 ]; then
+  is_valid_hostname "$HYSTERIA_PREVIOUS_DOMAIN_FOR_RECOVERY" \\
+    || fail "Не задан корректный предыдущий домен для восстановления"
+fi
 
 install -d -m 755 /run/lock
 if ! mkdir "$SETUP_LOCK_DIR" 2>/dev/null; then
@@ -524,7 +789,8 @@ if ! command -v cron >/dev/null 2>&1 \\
   || ! command -v jq >/dev/null 2>&1 \\
   || ! command -v flock >/dev/null 2>&1 \\
   || ! command -v openssl >/dev/null 2>&1 \\
-  || ! command -v timeout >/dev/null 2>&1; then
+  || ! command -v timeout >/dev/null 2>&1 \\
+  || ! command -v sync >/dev/null 2>&1; then
   command -v apt-get >/dev/null 2>&1 \\
     || fail "Для установки cron, jq, util-linux, openssl и coreutils необходим apt-get"
   echo "Установка cron, jq, util-linux, openssl и coreutils..."
@@ -556,6 +822,25 @@ install -d -m 755 \\
   "$CERTBOT_DIR/work" \\
   "$CERTBOT_DIR/logs" \\
   "$CADDY_WEBROOT/.well-known/acme-challenge"
+CERT_LIVE_DIR="$CERTBOT_DIR/certs/live/$HYSTERIA_DOMAIN"
+RENEWAL_CONF="$CERTBOT_DIR/certs/renewal/$HYSTERIA_DOMAIN.conf"
+
+if [ -e "$RENEWAL_CONF" ] \\
+  || [ -e "$CERT_LIVE_DIR" ] \\
+  || [ -L "$CERT_LIVE_DIR" ]; then
+  [ -f "$RENEWAL_CONF" ] \\
+    && [ -s "$CERT_LIVE_DIR/fullchain.pem" ] \\
+    && [ -s "$CERT_LIVE_DIR/privkey.pem" ] \\
+    || fail "Состояние Certbot lineage для $HYSTERIA_DOMAIN неполное"
+  certificate_has_exact_dns_san "$CERT_LIVE_DIR/fullchain.pem" "$HYSTERIA_DOMAIN" \\
+    || fail "Certbot lineage содержит не только домен $HYSTERIA_DOMAIN; безопасное переиспользование невозможно"
+  if [ "$HYSTERIA_REQUIRE_MANAGED_LINEAGE" -eq 1 ]; then
+    lineage_marker_is_valid \\
+      || fail "Существующий Certbot lineage для $HYSTERIA_DOMAIN не принадлежит RWManager"
+  fi
+fi
+reserve_lineage_marker
+
 STAGE_DIR=$(mktemp -d "$CERTBOT_DIR/.hysteria2-stage.XXXXXX")
 
 backup_file "$CERTBOT_ENV" certbot-env
@@ -574,8 +859,34 @@ if [ -d "$CERT_DEPLOY_DIR" ]; then
   cp -a "$CERT_DEPLOY_DIR" "$STAGE_DIR/deploy-dir.before"
   : > "$STAGE_DIR/deploy-dir.exists"
 fi
+if [ -L "$CERT_MOUNT_SOURCE" ] \\
+  && [ -s "$CERT_MOUNT_SOURCE/fullchain.pem" ] \\
+  && [ -s "$CERT_MOUNT_SOURCE/privkey.pem" ]; then
+  ROLLBACK_HAD_CURRENT=1
+  ROLLBACK_CURRENT_TARGET=$(readlink "$CERT_MOUNT_SOURCE")
+  ROLLBACK_CERT_HASH=$(sha256sum "$CERT_MOUNT_SOURCE/fullchain.pem" | awk '{ print $1 }')
+  ROLLBACK_KEY_HASH=$(sha256sum "$CERT_MOUNT_SOURCE/privkey.pem" | awk '{ print $1 }')
+  if [ "$HYSTERIA_RECONFIGURE_MODE" -eq 1 ] \\
+    && is_valid_hostname "$HYSTERIA_PREVIOUS_DOMAIN_FOR_RECOVERY"; then
+    ROLLBACK_HYSTERIA_DOMAIN="$HYSTERIA_PREVIOUS_DOMAIN_FOR_RECOVERY"
+  elif [ -f "$STAGE_DIR/backup-certbot-env.exists" ]; then
+    PREVIOUS_ENV_DOMAIN=$(
+      sed -n 's/^HYSTERIA_DOMAIN=//p' "$STAGE_DIR/backup-certbot-env" \\
+        | tr -d '\\r'
+    )
+    if is_valid_hostname "$PREVIOUS_ENV_DOMAIN"; then
+      ROLLBACK_HYSTERIA_DOMAIN="$PREVIOUS_ENV_DOMAIN"
+    fi
+  fi
+fi
 
-printf 'HYSTERIA_DOMAIN=%s\\n' "$HYSTERIA_DOMAIN" > "$STAGE_DIR/hysteria2.env"
+{
+  printf 'HYSTERIA_DOMAIN=%s\\n' "$HYSTERIA_DOMAIN"
+  if [ "$HYSTERIA_RECONFIGURE_MODE" -eq 1 ] \\
+    && [ "$HYSTERIA_PREVIOUS_DOMAIN_FOR_RECOVERY" != "$HYSTERIA_DOMAIN" ]; then
+    printf 'HYSTERIA_PREVIOUS_DOMAIN=%s\\n' "$HYSTERIA_PREVIOUS_DOMAIN_FOR_RECOVERY"
+  fi
+} > "$STAGE_DIR/hysteria2.env"
 chmod 600 "$STAGE_DIR/hysteria2.env"
 
 cat > "$STAGE_DIR/ensure-caddy-webroot.sh" <<'CADDY_HELPER_EOF'
@@ -631,8 +942,8 @@ HYSTERIA_ENV_FILE="$STAGE_DIR/hysteria2.env" \\
   "$STAGE_DIR/ensure-caddy-webroot.sh"
 
 echo "[3/5] Получение сертификата Let's Encrypt..."
-docker compose -f "$STAGE_DIR/docker-compose.hysteria2.yml" \\
-  run --rm -T certbot certonly \\
+run_certbot_bounded 10m "Получение сертификата Let's Encrypt" \\
+  certonly \\
   --webroot \\
   --webroot-path /var/www/certbot \\
   --preferred-challenges http \\
@@ -641,32 +952,42 @@ docker compose -f "$STAGE_DIR/docker-compose.hysteria2.yml" \\
   --non-interactive \\
   --agree-tos \\
   --no-eff-email \\
-  --email "$CERTBOT_EMAIL" </dev/null
+  --email "$CERTBOT_EMAIL"
 
-CERT_LIVE_DIR="$CERTBOT_DIR/certs/live/$HYSTERIA_DOMAIN"
-RENEWAL_CONF="$CERTBOT_DIR/certs/renewal/$HYSTERIA_DOMAIN.conf"
 [ -s "$CERT_LIVE_DIR/fullchain.pem" ] || fail "fullchain.pem не создан"
 [ -s "$CERT_LIVE_DIR/privkey.pem" ] || fail "privkey.pem не создан"
 [ -f "$RENEWAL_CONF" ] || fail "Certbot не создал renewal-конфигурацию"
+openssl x509 -in "$CERT_LIVE_DIR/fullchain.pem" \\
+  -checkhost "$HYSTERIA_DOMAIN" -noout \\
+  || fail "Полученный сертификат не содержит домен $HYSTERIA_DOMAIN"
+certificate_has_exact_dns_san "$CERT_LIVE_DIR/fullchain.pem" "$HYSTERIA_DOMAIN" \\
+  || fail "Полученный сертификат содержит неожиданный набор SAN"
 
 renewal_uses_expected_webroot() {
   grep -Eq \\
     '^[[:space:]]*authenticator[[:space:]]*=[[:space:]]*webroot[[:space:]]*$' \\
     "$RENEWAL_CONF" \\
-    && grep -Eq \\
-      '=[[:space:]]*/var/www/certbot[[:space:]]*$' \\
-      "$RENEWAL_CONF"
+    && awk -F= -v domain="$HYSTERIA_DOMAIN" '
+      {
+        key = $1
+        value = $2
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        if (key == domain && value == "/var/www/certbot") found = 1
+      }
+      END { exit !found }
+    ' "$RENEWAL_CONF"
 }
 
 RENEWAL_TESTED=0
 if ! renewal_uses_expected_webroot; then
   echo "Перевод существующего Certbot-lineage на webroot..."
-  docker compose -f "$STAGE_DIR/docker-compose.hysteria2.yml" \\
-    run --rm -T certbot reconfigure \\
+  run_certbot_bounded 10m "Перенастройка Certbot lineage" \\
+    reconfigure \\
     --cert-name "$HYSTERIA_DOMAIN" \\
     --authenticator webroot \\
     --webroot-path /var/www/certbot \\
-    --non-interactive </dev/null
+    --non-interactive
   RENEWAL_TESTED=1
 fi
 
@@ -698,8 +1019,10 @@ if [ "$RENEWAL_TESTED" -eq 0 ]; then
   esac
 fi
 
-# Сертификат получен и renewal проверен через staging: ACME-маршрут уже нужен постоянно.
-CADDY_RESTORE_NEEDED=0
+if [ "$HYSTERIA_RECONFIGURE_MODE" -eq 1 ]; then
+  echo "Публикация новой renewal-конфигурации перед переключением сертификата..."
+  publish_runtime_configuration
+fi
 
 CERT_CHANGED=0
 if ! cmp -s "$CERT_LIVE_DIR/fullchain.pem" "$CERT_MOUNT_SOURCE/fullchain.pem" \\
@@ -708,6 +1031,9 @@ if ! cmp -s "$CERT_LIVE_DIR/fullchain.pem" "$CERT_MOUNT_SOURCE/fullchain.pem" \\
 fi
 RESTART_REMNANODE=0 HYSTERIA_ENV_FILE="$STAGE_DIR/hysteria2.env" \\
   "$STAGE_DIR/deploy-hysteria2-cert.sh"
+if [ "$CERT_CHANGED" -eq 1 ]; then
+  REMNANODE_RESTORE_NEEDED=1
+fi
 CERT_MOUNT_REAL=$(readlink -f "$CERT_MOUNT_SOURCE")
 [ -d "$CERT_MOUNT_REAL" ] || fail "Активное поколение сертификата не опубликовано"
 
@@ -777,29 +1103,27 @@ if [ "$COMPOSE_CHANGED" -eq 1 ] \\
   REMNANODE_RECREATED=1
 fi
 
-(
-  cd "$REMNANODE_DIR"
-  docker compose exec -T --interactive=false remnanode \\
-    test -r /etc/hysteria2/fullchain.pem </dev/null
-  docker compose exec -T --interactive=false remnanode \\
-    test -r /etc/hysteria2/privkey.pem </dev/null
-) || fail "Контейнер remnanode не видит сертификат или закрытый ключ"
+# Любая поздняя ошибка должна пересоздать и заново проверить прежний container state.
+REMNANODE_RESTORE_NEEDED=1
+verify_remnanode_certificate_mount_with_retry \\
+  "$HYSTERIA_DOMAIN" "$CERT_MOUNT_SOURCE" \\
+  || fail "Контейнер remnanode использует не тот сертификат или небезопасный mount"
 if [ "$REMNANODE_RECREATED" -eq 1 ]; then
   rm -f "$RESTART_MARKER"
 fi
 
 echo "[5/5] Установка автоматического обновления..."
-install -o root -g root -m 600 "$STAGE_DIR/hysteria2.env" "$CERTBOT_ENV"
-install -o root -g root -m 750 "$STAGE_DIR/ensure-caddy-webroot.sh" "$CERTBOT_HELPER"
-install -o root -g root -m 750 "$STAGE_DIR/deploy-hysteria2-cert.sh" "$CERTBOT_DEPLOY"
-install -o root -g root -m 750 "$STAGE_DIR/renew-hysteria2.sh" "$CERTBOT_RENEW"
-install -o root -g root -m 644 "$STAGE_DIR/docker-compose.hysteria2.yml" "$CERTBOT_COMPOSE"
-install -o root -g root -m 644 "$STAGE_DIR/rwm-hysteria2-certbot.cron" "$CRON_FILE"
+if [ "$HYSTERIA_RECONFIGURE_MODE" -eq 0 ]; then
+  publish_runtime_configuration
+else
+  echo "Renewal-конфигурация уже опубликована атомарно."
+fi
 
 if ! (systemctl enable --now cron 2>/dev/null || service cron start 2>/dev/null); then
   fail "Не удалось запустить планировщик cron"
 fi
 
+CADDY_RESTORE_NEEDED=0
 TRANSACTION_ACTIVE=0
 
 # Cleanup is deliberately post-commit: rollback may still need every old
@@ -826,4 +1150,232 @@ if [ -n "$UDP_443_LISTENERS" ]; then
   echo "[WARN] UDP/443 уже занят. Убедитесь, что его слушает ожидаемый процесс."
 else
   echo "UDP/443 сейчас свободен. Откройте 443/udp в системном и облачном firewall перед включением inbound."
+fi`;
+
+const HYSTERIA2_RECONFIGURE_SETUP_SCRIPT = HYSTERIA2_SETUP_SCRIPT.replace(
+  `HYSTERIA_DOMAIN="${HYSTERIA2_DOMAIN_INPUT}"`,
+  'HYSTERIA_DOMAIN="$REQUESTED_HYSTERIA_DOMAIN"',
+);
+
+export const HYSTERIA2_RECONFIGURE_SCRIPT = `set -Eeuo pipefail
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+MANAGED_ENV="/opt/certbot/hysteria2.env"
+MANAGED_COMPOSE="/opt/certbot/docker-compose.hysteria2.yml"
+MANAGED_HELPER="/opt/certbot/ensure-caddy-webroot.sh"
+MANAGED_DEPLOY="/opt/certbot/deploy-hysteria2-cert.sh"
+MANAGED_RENEW="/opt/certbot/renew-hysteria2.sh"
+CURRENT_CERT_DIR="/opt/hysteria2-certs/current"
+LINEAGE_MARKER_DIR="/opt/certbot/rwm-hysteria2-lineages"
+REQUESTED_HYSTERIA_DOMAIN="${HYSTERIA2_NEW_DOMAIN_INPUT}"
+
+reconfigure_fail() {
+  echo "[ERROR] $*" >&2
+  exit 1
+}
+
+is_valid_hostname() {
+  local value="$1"
+  local label=""
+  local labels=()
+
+  [ "\${#value}" -ge 3 ] && [ "\${#value}" -le 253 ] || return 1
+  [ "$value" = "\${value,,}" ] || return 1
+  [[ "$value" != *..* && "$value" == *.* ]] || return 1
+  IFS='.' read -r -a labels <<< "$value"
+  for label in "\${labels[@]}"; do
+    [ "\${#label}" -ge 1 ] && [ "\${#label}" -le 63 ] || return 1
+    [[ "$label" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || return 1
+  done
+}
+
+certificate_has_exact_dns_san() {
+  local certificate="$1"
+  local expected_domain="$2"
+  local san_domains=""
+
+  san_domains=$(
+    openssl x509 -in "$certificate" -noout -ext subjectAltName 2>/dev/null \\
+      | grep -oE 'DNS:[^,[:space:]]+' \\
+      | sed 's/^DNS://' \\
+      | sort -u
+  ) || return 1
+  [ "$san_domains" = "$expected_domain" ]
+}
+
+renewal_uses_expected_webroot_for() {
+  local renewal_file="$1"
+  local expected_domain="$2"
+
+  grep -Eq \\
+    '^[[:space:]]*authenticator[[:space:]]*=[[:space:]]*webroot[[:space:]]*$' \\
+    "$renewal_file" \\
+    && awk -F= -v domain="$expected_domain" '
+      {
+        key = $1
+        value = $2
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        if (key == domain && value == "/var/www/certbot") found = 1
+      }
+      END { exit !found }
+    ' "$renewal_file"
+}
+
+lineage_marker_is_valid_for() {
+  local domain="$1"
+  local marker="$LINEAGE_MARKER_DIR/$domain"
+  local marker_mode=""
+
+  [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+  [ "$(stat -c '%u' "$marker")" -eq 0 ] || return 1
+  marker_mode=$(stat -c '%a' "$marker") || return 1
+  (( (8#$marker_mode & 8#022) == 0 )) || return 1
+  [ "$(cat "$marker")" = "$domain" ]
+}
+
+reserve_lineage_marker_for() {
+  local domain="$1"
+  local marker="$LINEAGE_MARKER_DIR/$domain"
+  local marker_tmp=""
+
+  if [ -e "$LINEAGE_MARKER_DIR" ]; then
+    [ -d "$LINEAGE_MARKER_DIR" ] && [ ! -L "$LINEAGE_MARKER_DIR" ] \\
+      || reconfigure_fail "$LINEAGE_MARKER_DIR имеет небезопасный тип"
+    [ "$(stat -c '%u' "$LINEAGE_MARKER_DIR")" -eq 0 ] \\
+      || reconfigure_fail "$LINEAGE_MARKER_DIR не принадлежит root"
+  fi
+  install -d -o root -g root -m 700 "$LINEAGE_MARKER_DIR"
+  if [ -e "$marker" ] || [ -L "$marker" ]; then
+    lineage_marker_is_valid_for "$domain" \\
+      || reconfigure_fail "Маркер Certbot lineage для $domain повреждён или небезопасен"
+    return 0
+  fi
+
+  marker_tmp=$(mktemp "$LINEAGE_MARKER_DIR/.marker.XXXXXX")
+  printf '%s\\n' "$domain" > "$marker_tmp"
+  chown root:root "$marker_tmp"
+  chmod 600 "$marker_tmp"
+  mv -Tf "$marker_tmp" "$marker"
+}
+
+[ "$(id -u)" -eq 0 ] \\
+  || reconfigure_fail "Скрипт нужно запускать от root или через sudo"
+command -v openssl >/dev/null 2>&1 \\
+  || reconfigure_fail "openssl не установлен"
+
+for managed_file in \\
+  "$MANAGED_ENV" \\
+  "$MANAGED_COMPOSE" \\
+  "$MANAGED_HELPER" \\
+  "$MANAGED_DEPLOY" \\
+  "$MANAGED_RENEW"; do
+  [ -f "$managed_file" ] \\
+    || reconfigure_fail "$managed_file не найден. Сначала выполните «Настройка Hysteria2»"
+  [ "$(stat -c '%u' "$managed_file")" -eq 0 ] \\
+    || reconfigure_fail "$managed_file не принадлежит root"
+done
+
+grep -qF '# Managed by RWManager: Hysteria2 certificate' "$MANAGED_COMPOSE" \\
+  || reconfigure_fail "$MANAGED_COMPOSE не является конфигурацией RWManager"
+[ "$(grep -c '^HYSTERIA_DOMAIN=' "$MANAGED_ENV" || true)" -eq 1 ] \\
+  || reconfigure_fail "В $MANAGED_ENV отсутствует однозначный текущий домен"
+[ "$(grep -c '^HYSTERIA_PREVIOUS_DOMAIN=' "$MANAGED_ENV" || true)" -le 1 ] \\
+  || reconfigure_fail "В $MANAGED_ENV неоднозначно задан предыдущий домен"
+
+CURRENT_HYSTERIA_DOMAIN=$(
+  sed -n 's/^HYSTERIA_DOMAIN=//p' "$MANAGED_ENV" | tr -d '\\r'
+)
+PREVIOUS_HYSTERIA_DOMAIN=$(
+  sed -n 's/^HYSTERIA_PREVIOUS_DOMAIN=//p' "$MANAGED_ENV" | tr -d '\\r'
+)
+is_valid_hostname "$CURRENT_HYSTERIA_DOMAIN" \\
+  || reconfigure_fail "Текущий домен в $MANAGED_ENV некорректен"
+if [ -n "$PREVIOUS_HYSTERIA_DOMAIN" ]; then
+  is_valid_hostname "$PREVIOUS_HYSTERIA_DOMAIN" \\
+    || reconfigure_fail "Предыдущий домен в $MANAGED_ENV некорректен"
+fi
+is_valid_hostname "$REQUESTED_HYSTERIA_DOMAIN" \\
+  || reconfigure_fail "Новый домен Hysteria2 некорректен"
+
+CURRENT_RENEWAL_CONF="/opt/certbot/certs/renewal/$CURRENT_HYSTERIA_DOMAIN.conf"
+CURRENT_LIVE_DIR="/opt/certbot/certs/live/$CURRENT_HYSTERIA_DOMAIN"
+[ -f "$CURRENT_RENEWAL_CONF" ] \\
+  && [ -s "$CURRENT_LIVE_DIR/fullchain.pem" ] \\
+  && [ -s "$CURRENT_LIVE_DIR/privkey.pem" ] \\
+  || reconfigure_fail "Certbot lineage текущего домена неполное"
+renewal_uses_expected_webroot_for \\
+  "$CURRENT_RENEWAL_CONF" "$CURRENT_HYSTERIA_DOMAIN" \\
+  || reconfigure_fail "Текущий Certbot lineage не использует ожидаемый webroot RWManager"
+certificate_has_exact_dns_san \\
+  "$CURRENT_LIVE_DIR/fullchain.pem" "$CURRENT_HYSTERIA_DOMAIN" \\
+  || reconfigure_fail "Текущий Certbot lineage содержит неожиданный набор SAN"
+reserve_lineage_marker_for "$CURRENT_HYSTERIA_DOMAIN"
+
+[ -L "$CURRENT_CERT_DIR" ] \\
+  || reconfigure_fail "$CURRENT_CERT_DIR не является активной ссылкой сертификата"
+[ -s "$CURRENT_CERT_DIR/fullchain.pem" ] \\
+  || reconfigure_fail "Текущий fullchain.pem не найден"
+[ -s "$CURRENT_CERT_DIR/privkey.pem" ] \\
+  || reconfigure_fail "Текущий privkey.pem не найден"
+openssl x509 -in "$CURRENT_CERT_DIR/fullchain.pem" -checkend 0 -noout \\
+  || reconfigure_fail "Текущий сертификат просрочен или повреждён"
+if certificate_has_exact_dns_san \\
+  "$CURRENT_CERT_DIR/fullchain.pem" "$CURRENT_HYSTERIA_DOMAIN"; then
+  ACTIVE_CERT_DOMAIN="$CURRENT_HYSTERIA_DOMAIN"
+elif [ "$REQUESTED_HYSTERIA_DOMAIN" != "$CURRENT_HYSTERIA_DOMAIN" ] \\
+  && lineage_marker_is_valid_for "$REQUESTED_HYSTERIA_DOMAIN" \\
+  && certificate_has_exact_dns_san \\
+    "$CURRENT_CERT_DIR/fullchain.pem" "$REQUESTED_HYSTERIA_DOMAIN"; then
+  ACTIVE_CERT_DOMAIN="$REQUESTED_HYSTERIA_DOMAIN"
+  echo "Обнаружено прерванное переключение на $REQUESTED_HYSTERIA_DOMAIN; продолжаем восстановление."
+elif [ -n "$PREVIOUS_HYSTERIA_DOMAIN" ] \\
+  && lineage_marker_is_valid_for "$PREVIOUS_HYSTERIA_DOMAIN" \\
+  && certificate_has_exact_dns_san \\
+    "$CURRENT_CERT_DIR/fullchain.pem" "$PREVIOUS_HYSTERIA_DOMAIN"; then
+  ACTIVE_CERT_DOMAIN="$PREVIOUS_HYSTERIA_DOMAIN"
+  echo "Обнаружено незавершённое переключение с $PREVIOUS_HYSTERIA_DOMAIN; продолжаем восстановление."
+else
+  reconfigure_fail "Активный сертификат не соответствует ни текущему, ни запрошенному домену"
+fi
+
+if [ "$REQUESTED_HYSTERIA_DOMAIN" = "$CURRENT_HYSTERIA_DOMAIN" ]; then
+  echo "Домен уже установлен: $CURRENT_HYSTERIA_DOMAIN"
+  echo "Будет выполнена идемпотентная проверка сертификата и renewal."
+else
+  NEW_RENEWAL_CONF="/opt/certbot/certs/renewal/$REQUESTED_HYSTERIA_DOMAIN.conf"
+  NEW_LIVE_DIR="/opt/certbot/certs/live/$REQUESTED_HYSTERIA_DOMAIN"
+  if [ -e "$NEW_RENEWAL_CONF" ] \\
+    || [ -e "$NEW_LIVE_DIR" ] \\
+    || [ -L "$NEW_LIVE_DIR" ]; then
+    [ -f "$NEW_RENEWAL_CONF" ] \\
+      && [ -s "$NEW_LIVE_DIR/fullchain.pem" ] \\
+      && [ -s "$NEW_LIVE_DIR/privkey.pem" ] \\
+      || reconfigure_fail "Состояние существующего Certbot lineage для нового домена неполное"
+    lineage_marker_is_valid_for "$REQUESTED_HYSTERIA_DOMAIN" \\
+      || reconfigure_fail "Существующий Certbot lineage нового домена не принадлежит RWManager"
+    renewal_uses_expected_webroot_for \\
+      "$NEW_RENEWAL_CONF" "$REQUESTED_HYSTERIA_DOMAIN" \\
+      || reconfigure_fail "Certbot lineage нового домена не управляется ожидаемым webroot RWManager"
+    certificate_has_exact_dns_san \\
+      "$NEW_LIVE_DIR/fullchain.pem" "$REQUESTED_HYSTERIA_DOMAIN" \\
+      || reconfigure_fail "Существующий Certbot lineage содержит неожиданный набор SAN"
+    echo "Найден совместимый Certbot lineage нового домена; он будет проверен и переиспользован."
+  fi
+  echo "Смена домена Hysteria2: $CURRENT_HYSTERIA_DOMAIN -> $REQUESTED_HYSTERIA_DOMAIN"
+fi
+
+HYSTERIA_REQUIRE_MANAGED_LINEAGE=1
+HYSTERIA_RECONFIGURE_MODE=1
+HYSTERIA_PREVIOUS_DOMAIN_FOR_RECOVERY="$ACTIVE_CERT_DOMAIN"
+${HYSTERIA2_RECONFIGURE_SETUP_SCRIPT}
+
+if [ "$CURRENT_HYSTERIA_DOMAIN" = "$HYSTERIA_DOMAIN" ]; then
+  echo "=== Hysteria2: текущий домен и сертификат проверены ==="
+else
+  echo "=== Hysteria2: домен успешно изменён ==="
+  echo "Старый домен: $CURRENT_HYSTERIA_DOMAIN"
+  echo "Новый домен:  $HYSTERIA_DOMAIN"
+  echo "[INFO] Старый Certbot lineage и ACME-маршрут сохранены как резерв для отката."
+  echo "[IMPORTANT] Обновите домен/SNI соответствующих hosts и клиентов в Remnawave."
 fi`;
